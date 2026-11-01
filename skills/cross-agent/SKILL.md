@@ -26,7 +26,9 @@ The host owns permissions, task classification, installed sources and session id
 4. Read [skill-context.md](references/skill-context.md) for an explicit skill. Resolve
    only host-allowlisted resources relative to its installed base. Missing/denied
    resources return `UNAVAILABLE`; never install a missing dependency implicitly.
-5. Use only explicitly configured agents and verified profiles. CLI presence or login
+5. Use only configured agents and verified profiles. Without `--config` the launcher
+   uses the owner-attested [default config](config/default.json): Claude Code reviews,
+   Codex reviews or executes. An explicit `--config` replaces it. CLI presence or login
    supplies no authorization. Pending live capability remains unavailable.
 
 ## Dispatch and continue
@@ -34,7 +36,8 @@ The host owns permissions, task classification, installed sources and session id
 1. Write private host/config JSON outside tracked files, then invoke:
 
    ```text
-   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json>      --config <agents-json> 'claude opus low [assignment]'
+   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
+     [--config <agents-json>] 'claude opus low [assignment]'
    ```
 
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry

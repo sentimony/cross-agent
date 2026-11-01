@@ -6,7 +6,10 @@
 2. The extracted command builders preserve the embedded source's explicit model/effort,
    permissions and child environment contracts. They have fake-CLI fixture coverage;
    this standalone candidate has no native version/install/invocation matrix.
-3. No production execution policy is shipped. A trusted host may attest bounded local
+3. The bundled `config/default.json` marks the Claude Code read-only and Codex
+   read-only/execution profiles `supported` on the owner's attestation; it is not probe
+   evidence. Replace it with an explicit `--config` where that attestation does not hold.
+   No production execution policy is shipped. A trusted host may attest bounded local
    workspace actions only after checking isolation, delegation denial and fresh/resume
    behavior. Unknown combinations return `UNAVAILABLE`.
 4. Native profile, actual provider identity, credits and billing require separate approved

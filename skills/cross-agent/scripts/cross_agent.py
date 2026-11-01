@@ -499,10 +499,14 @@ def dispatch(request, host_context):
     return result
 
 
+DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'default.json'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host-context', required=True, help='Explicit trusted host JSON, never child-provided')
-    parser.add_argument('--config', required=True, help='Explicit trusted agent configuration JSON')
+    parser.add_argument('--config', default=str(DEFAULT_CONFIG),
+                        help='Trusted agent configuration JSON; defaults to the bundled config/default.json')
     parser.add_argument('request', help='One literal bracket request argument; no shell evaluation')
     args = parser.parse_args(argv)
     raw = json.loads(Path(args.host_context).read_text('utf-8'))

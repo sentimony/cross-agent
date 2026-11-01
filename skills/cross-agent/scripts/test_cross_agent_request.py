@@ -135,4 +135,26 @@ class RequestTests(unittest.TestCase):
             r.resolve_agents(r.parse_request('[a] agy'), self.config(data, 'execution', 'execution'), 'codex')
 
 
+class BundledDefaultTests(unittest.TestCase):
+    def test_launcher_falls_back_to_bundled_default(self):
+        import cross_agent
+        self.assertTrue(cross_agent.DEFAULT_CONFIG.is_file())
+        self.assertEqual(cross_agent.DEFAULT_CONFIG.parent.name, 'config')
+
+    def test_default_routes_review_and_execution(self):
+        import cross_agent
+        review = r.load_config(host_config=cross_agent.DEFAULT_CONFIG, role='review', profile='read-only')
+        choices = r.resolve_agents(r.parse_request('[a]'), review, 'codex')
+        self.assertEqual([(c.family, c.model, c.effort) for c in choices],
+                         [('claude-code', 'claude-opus-5-5', 'medium')])
+        fable = r.resolve_agents(r.parse_request('[a] claude fable high'), review, 'codex')[0]
+        self.assertEqual((fable.model, fable.effort), ('claude-fable-5-1', 'high'))
+        execution = r.load_config(host_config=cross_agent.DEFAULT_CONFIG, role='execution', profile='execution')
+        writer = r.resolve_agents(r.parse_request('[a]'), execution, 'claude-code')
+        self.assertEqual([(c.family, c.model, c.effort) for c in writer],
+                         [('codex', 'gpt-6.1-sol', 'medium')])
+        with self.assertRaises(r.UnavailableError):
+            r.resolve_agents(r.parse_request('[a] claude'), execution, 'codex')
+
+
 if __name__ == '__main__': unittest.main()
