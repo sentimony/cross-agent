@@ -1,0 +1,20 @@
+{
+  "name": "cross-agent",
+  "version": "0.0.1",
+  "description": "Delegate consultations and installed skills to explicitly configured agent CLIs with persistent task and provider session identities.",
+  "author": {
+    "name": "Ihor Orlovskyi",
+    "email": "ihororlovskyi@gmail.com",
+    "url": "https://github.com/sentimony"
+  },
+  "repository": "https://github.com/sentimony/cross-agent",
+  "license": "MIT",
+  "keywords": [
+    "cross-agent",
+    "delegation",
+    "consultation",
+    "sessions",
+    "agent-skills"
+  ],
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json"
+}
