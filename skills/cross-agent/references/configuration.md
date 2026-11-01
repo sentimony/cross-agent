@@ -70,6 +70,22 @@ until its live probe succeeds. Configuration parsing validates the status contra
 it does not perform the probe. Antigravity execution remains unavailable even if a
 configuration incorrectly marks it supported.
 
+## Bundled default
+
+The launcher reads `config/default.json` from the installed skill when `--config` is
+omitted. It is an owner-attested default, not live probe evidence:
+
+1. `claude-code`: `claude-opus-5-5` (default) and `claude-fable-5-1`, every effort,
+   default `medium`, `read-only` only.
+2. `codex`: `gpt-6.1-sol`, efforts `low`, `medium`, `high`, default `medium`,
+   `read-only` and `execution`.
+3. Antigravity is absent, so it stays unavailable until an explicit config adds it.
+
+An explicit `--config` replaces the default entirely; it is not layered on top. The
+`load_config` library function stays pure: it never reads the default itself. A host
+that wants the default as a ceiling passes it as `user_config` and its own policy as a
+narrowing layer.
+
 ## Explicit sources and restrictions
 
 `load_config` accepts `user_config`, `project_config`, and `host_config`. Each is an

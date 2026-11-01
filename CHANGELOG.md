@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
+   is omitted: Claude Code (Opus 5.5 default, Fable 5.1) reviews, Codex `gpt-6.1-sol`
+   reviews or executes, both at `medium` effort by default. An explicit `--config`
+   replaces it.
+
 ## 0.0.1 - 2026-11-01
 
 1. Prepare a standalone plugin with generic bracket parsing, explicit agent profiles,

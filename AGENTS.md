@@ -11,7 +11,10 @@
    Versions start at `0.0.1` and increase by patch only when authorized.
 4. Tests use private HOME/PATH and fake CLIs. Never fall back to native authenticated
    agents. Native CLI, auth, model, release and production checks require explicit permission.
-5. Do not claim OS containment or live host support from fake-process tests. This local
+5. Do not claim OS containment or live host support from fake-process tests. The
+   bundled `config/default.json` marks profiles `supported` on the owner's attestation:
+   an accepted compromise, not a defect for review, so the skill works after install
+   without a config file. Do not cite it as live probe evidence. This local
    candidate has no verified native installation matrix or released compatibility pair.
 6. Preserve registry/provider provenance and unknown usage. Delegated calls must reject
    nested launcher entry through CLI, direct API and resume before subprocess creation.
