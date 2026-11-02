@@ -172,7 +172,8 @@ def _validate(data):
                     or session['role'] not in ('review', 'consultation', 'execution')
                     or session['profile'] != ('execution' if session['role'] == 'execution' else 'read-only')
                     or session['status'] not in ('idle', 'running', 'completed', 'failed', 'blocked')
-                    or session['cli_session_id'] == ''):
+                    or session['cli_session_id'] == ''
+                    or type(session.get('adopted', False)) is not bool):
                 raise ValueError()
             conflicts = session.get('provider_conflicts', [])
             if not isinstance(conflicts, list):
@@ -222,8 +223,11 @@ def _validate(data):
         raise StateError('CORRUPT_REGISTRY') from exc
 
 
-@contextmanager
-def _registry(context):
+def _empty():
+    return {'schema_version': 1, 'tasks': {}, 'sessions': {}, 'conversations': {}}
+
+
+def _registry_dir(context):
     path = Path(context.registry_path)
     if not path.is_absolute() or '..' in path.parts:
         raise StateError('UNSAFE_REGISTRY_PATH')
@@ -231,6 +235,47 @@ def _registry(context):
     for parent in reversed((path,) + tuple(path.parents)):
         if parent.is_symlink():
             raise StateError('UNSAFE_REGISTRY_PATH')
+    return path
+
+
+def _load(directory):
+    try:
+        os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return _empty()
+    fd = _open_private(directory, 'registry.json', os.O_RDONLY)
+    try:
+        with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+            raw = stream.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise StateError('REGISTRY_TOO_LARGE')
+            data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise StateError('CORRUPT_REGISTRY') from exc
+    _validate(data)
+    return data
+
+
+def read_registry(context):
+    """Validated snapshot without the lock or a rewrite; writers replace atomically.
+    A missing registry reads as empty and nothing is created."""
+    path = _registry_dir(context)
+    try:
+        directory = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return _empty()
+    except OSError as exc:
+        raise StateError('UNSAFE_REGISTRY_PATH') from exc
+    try:
+        _private(os.fstat(directory), True)
+        return _load(directory)
+    finally:
+        os.close(directory)
+
+
+@contextmanager
+def _registry(context):
+    path = _registry_dir(context)
     try:
         path.mkdir(mode=0o700)
     except FileExistsError:
@@ -249,21 +294,7 @@ def _registry(context):
                 if time.monotonic() >= deadline:
                     raise StateError('REGISTRY_BUSY')
                 time.sleep(0.01)
-        try:
-            os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
-        except FileNotFoundError:
-            data = {'schema_version': 1, 'tasks': {}, 'sessions': {}, 'conversations': {}}
-        else:
-            fd = _open_private(directory, 'registry.json', os.O_RDONLY)
-            try:
-                with os.fdopen(fd, 'r', encoding='utf-8') as stream:
-                    raw = stream.read(8 * 1024 * 1024 + 1)
-                    if len(raw) > 8 * 1024 * 1024:
-                        raise StateError('REGISTRY_TOO_LARGE')
-                    data = json.loads(raw)
-            except (ValueError, UnicodeError) as exc:
-                raise StateError('CORRUPT_REGISTRY') from exc
-            _validate(data)
+        data = _load(directory)
         yield data
         _validate(data)
         name = '.registry-' + str(uuid.uuid4())
@@ -366,7 +397,8 @@ def select_session(request, task_context, agent, role, profile):
 def adopt_session(context, agent, cli_session_id):
     """Bind an existing provider session, started outside the launcher, to a new registry
     session so later runs resume it. The trusted host supplies the ID; repeating the
-    call with the same agent returns the same session, any other owner is refused."""
+    call with the same agent and task returns the same session, any other owner,
+    including the same agent under another canonical issue, is refused."""
     try:
         provider = str(uuid.UUID(cli_session_id))
     except (TypeError, ValueError, AttributeError):
@@ -379,7 +411,8 @@ def adopt_session(context, agent, cli_session_id):
     with _registry(ctx) as data:
         for session in data['sessions'].values():
             if session['family'] == agent.family and provider in _provider_bindings(session):
-                if all(session[k] == v for k, v in key.items()):
+                issue = data['tasks'][session['task_id']]['canonical_issue']
+                if all(session[k] == v for k, v in key.items()) and issue == ctx.canonical_issue:
                     return session['session_id']
                 raise StateError('PROVIDER_SESSION_OWNED')
         issue = ctx.canonical_issue
@@ -390,7 +423,7 @@ def adopt_session(context, agent, cli_session_id):
         sid = str(uuid.uuid4())
         data['sessions'][sid] = dict(key, task_id=task_id, session_id=sid,
                                      cli_session_id=provider, observed_cli_session_id=provider,
-                                     status='idle', runs=[])
+                                     adopted=True, status='idle', runs=[])
         return sid
 
 

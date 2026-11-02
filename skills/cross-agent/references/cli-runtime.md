@@ -13,11 +13,16 @@
    Claude Code execution is an orchestrator profile: the host policy lists `read`,
    `write-workspace` and `orchestrate`, with `delegation_blocked: true`; config is not
    isolated, because the child loads user, project and local settings (hooks, skills,
-   instructions). It runs with `acceptEdits`, prompts denied, workspace tools, `Agent`
-   and `Skill`, no MCP servers and no web tools. The launcher stays blocked inside it.
-   `claude -p` reports neither model nor effort fields: the model counts as observed
-   when the envelope's `modelUsage` lists the requested model, and a Claude Code resume
-   pins session and model only, because effort is never reported. A trusted host may attest bounded local
+   instructions). It runs with `acceptEdits`, prompts denied, and `--tools` equal to
+   `--allowedTools` (workspace tools, `Agent` and `Skill`), so inherited settings cannot
+   add a tool; no MCP servers and no web tools. The launcher stays blocked inside it.
+   `claude -p` reports neither model nor effort fields, and its `modelUsage` also lists
+   subagent models. The requested model's presence there is a necessary condition; the
+   identity rests on the launcher's own `--model` flag and is recorded as
+   `model_basis: launch-flag+modelUsage` (`provider` when the envelope names the model).
+   A Claude Code resume and `identity_attested` pin session and model only, because
+   effort is never reported. Usage records `skills_note: not detected` for execution and
+   `disabled by policy` for read-only. A trusted host may attest bounded local
    workspace actions only after checking isolation, delegation denial and fresh/resume
    behavior. Unknown combinations return `UNAVAILABLE`.
 4. Native profile, actual provider identity, credits and billing require separate approved

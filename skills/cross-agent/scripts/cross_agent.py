@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, replace
 import json
 import math
 import os
+import pwd
 import re
 from pathlib import Path
 import signal
@@ -154,6 +155,7 @@ def _provider(family, run, requested_model=None):
                 for dest, source in (('actual_model', 'model'), ('actual_effort', 'reasoning_effort')):
                     if source in event['payload']:
                         observed[dest] = event['payload'][source]
+        observed['model_basis'] = 'provider' if observed.get('actual_model') is not None else None
         answer = (run / 'review.md').read_text('utf-8') if (run / 'review.md').is_file() else ''
     else:
         payload = json.loads(raw)
@@ -165,12 +167,15 @@ def _provider(family, run, requested_model=None):
             raise ValueError('invalid provider session ID')
         for dest, source in (('actual_model', 'model'), ('actual_effort', 'effort')):
             observed[dest] = payload.get(source)
-        # claude -p has no model field; its envelope lists the models it billed in
-        # modelUsage (subagents add theirs), so only the requested model's presence counts.
+        observed['model_basis'] = 'provider' if observed['actual_model'] is not None else None
+        # claude -p reports no main-thread model, and modelUsage also lists subagent
+        # models. The requested model's presence is only a necessary condition; the
+        # identity rests on the launcher's own --model flag, recorded as model_basis.
         model_usage = payload.get('modelUsage')
         if (family == 'claude-code' and observed['actual_model'] is None
                 and isinstance(model_usage, dict) and requested_model in model_usage):
             observed['actual_model'] = requested_model
+            observed['model_basis'] = 'launch-flag+modelUsage'
         if family == 'claude-code':
             answer, parsed = transport.parse_claude_output(raw)
             if payload.get('is_error'):
@@ -206,7 +211,7 @@ def _provider_ids(family, run):
     return ids
 
 
-def _usage(agent, reported, observed, decision, previous_run, run, round_no):
+def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False):
     previous = transport._read_usage(previous_run) if previous_run is not None else None
     # Failed or mismatched identity evidence is not a cumulative accounting base,
     # even when its raw provider totals look complete.
@@ -218,7 +223,7 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no):
         previous=previous, session=observed.get('cli_session_id'),
         expected_session=decision.cli_session_id,
         round_no=round_no,
-        rounds_previous=previous)
+        rounds_previous=previous, profile=decision.profile)
     usage['scope'] = 'round'
     usage['provider_session_id'] = observed.get('cli_session_id')
     usage['identity_attested'] = False
@@ -230,6 +235,12 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no):
         _, _, usage['delta_reason'] = transport.resume_usage(
             reported['tokens'], reported['cost_usd'], previous,
             observed.get('cli_session_id'), decision.cli_session_id, agent.family)
+    if adopted and previous_run is None and agent.family != 'codex':
+        # Cumulative totals of an adopted session include usage from before adoption:
+        # keep them as the session total and baseline, but this round is unmeasured.
+        usage.update(tokens=None, cost_usd=None, cost_basis='unknown', prices_as_of=None,
+                     target_total=transport._target_total(None, None, round_no),
+                     delta_reason='adopted session: no baseline')
     _write(run / 'usage.json', usage)
     return usage
 
@@ -373,7 +384,7 @@ def dispatch(request, host_context):
                  'usage': {'tokens': None, 'cost_usd': None}}
         result.results.append(entry)
         run = run_id = decision = previous_run = None
-        cancelled = False
+        cancelled = adopted = False
         round_no = 1
         try:
             single = replace(request, agent_groups=(group,))
@@ -393,6 +404,7 @@ def dispatch(request, host_context):
             if decision.resume:
                 with state_store._registry(host.task_context) as registry:
                     runs = list(registry['sessions'][decision.session_id]['runs'])
+                    adopted = registry['sessions'][decision.session_id].get('adopted') is True
                 round_no = len(runs) + 1
                 if runs:
                     prior = Path(runs[-1]['artifact_path'])
@@ -448,7 +460,8 @@ def dispatch(request, host_context):
             try:
                 text, observed, reported = _provider(agent.family, run, agent.model)
                 entry['observed_identity'] = observed
-                entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run, round_no)
+                entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
+                                        round_no, adopted)
                 entry['artifacts']['usage'] = str(run / 'usage.json')
             except (OSError, ValueError, TypeError) as exc:
                 if entry['status'] == 'COMPLETED':
@@ -459,7 +472,10 @@ def dispatch(request, host_context):
                                       decision.cli_session_id if resume else None, observed,
                                       effort_reported=agent.family != 'claude-code')
                 entry.update(identity)
-                entry['usage']['identity_attested'] = all(value != 'unknown' for value in identity.values())
+                # claude -p never reports effort; as for resume, session and model attest.
+                entry['usage']['identity_attested'] = all(
+                    value != 'unknown' for key, value in identity.items()
+                    if not (key == 'actual_effort' and agent.family == 'claude-code'))
                 _write(run / 'usage.json', entry['usage'])
                 fields = {k: v for k, v in identity.items() if v != 'unknown'}
                 # A known provider ID owns its continuity boundary even when
@@ -525,12 +541,22 @@ def dispatch(request, host_context):
     return result
 
 
-def claude_transcript(workspace, cli_session_id, config_dir=None):
-    """Where Claude Code keeps a session started in workspace; resume finds only this one."""
+def claude_transcript(workspace, cli_session_id, config_dir=None, env=None):
+    """Where Claude Code keeps a session started in workspace; resume finds only this one.
+
+    env is the child environment; an explicit config_dir wins over it."""
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
     root = Path(config_dir) if config_dir else Path(
-        os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+        env.get('CLAUDE_CONFIG_DIR') or Path(home) / '.claude')
     slug = re.sub(r'[^A-Za-z0-9]', '-', str(Path(workspace)))
     return root / 'projects' / slug / (cli_session_id + '.jsonl')
+
+
+def _claude_child_env(host):
+    """The environment dispatch gives a Claude Code child, without per-run markers."""
+    env = dict(os.environ if host.environment is None else host.environment)
+    return transport.reviewer_environment(env, 'claude-code', pass_env=host.pass_env)
 
 
 def adopt(host, request, cli_session_id, config_dir=None):
@@ -538,7 +564,8 @@ def adopt(host, request, cli_session_id, config_dir=None):
         raise ValueError('adopt requires exactly one agent')
     agent = resolve_agents(request, host.config, host.host_family)[0]
     if agent.family == 'claude-code':
-        transcript = claude_transcript(host.workspace, str(cli_session_id), config_dir)
+        transcript = claude_transcript(host.workspace, str(cli_session_id), config_dir,
+                                       _claude_child_env(host))
         if not transcript.is_file():
             raise ValueError('ADOPT_TRANSCRIPT_MISSING: no session %s in the workspace project %s'
                              % (cli_session_id, transcript.parent))
@@ -579,13 +606,21 @@ def _transcript_tail(path, limit=262144):
     return text, tool, at
 
 
+def _elapsed(run):
+    """Run duration: until now while running, until finished_at once terminal."""
+    if not run.get('started_at'):
+        return None
+    end = time.time() if run.get('status') == 'running' else run.get('finished_at')
+    return round(end - run['started_at']) if end is not None else None
+
+
 def status(host, config_dir=None):
     """Read-only view of this repository's sessions, newest run first."""
     rows = []
-    with state_store._registry(host.task_context) as data:
-        sessions = [dict(s, runs=list(s['runs'])) for s in data['sessions'].values()
-                    if s['repo'] == host.task_context.repo]
-        tasks = dict(data['tasks'])
+    data = state_store.read_registry(host.task_context)
+    sessions = [s for s in data['sessions'].values() if s['repo'] == host.task_context.repo]
+    tasks = data['tasks']
+    child_env = _claude_child_env(host)
     for session in sessions:
         run = session['runs'][-1] if session['runs'] else {}
         alive = None
@@ -602,11 +637,11 @@ def status(host, config_dir=None):
                or session['task_id'], 'family': session['family'], 'model': session['model'],
                'effort': session['effort'], 'cli_session_id': cli, 'state': session['status'],
                'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
-               'elapsed_seconds': round(time.time() - run['started_at']) if run.get('started_at') else None,
+               'elapsed_seconds': _elapsed(run),
                'last_text': None, 'last_tool': None, 'last_at': None}
         if session['family'] == 'claude-code' and cli:
             row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(
-                claude_transcript(host.workspace, cli, config_dir))
+                claude_transcript(host.workspace, cli, config_dir, child_env))
         rows.append(row)
     rows.sort(key=lambda r: r['started_at'] or 0, reverse=True)
     return {'schema_version': 1, 'sessions': rows}

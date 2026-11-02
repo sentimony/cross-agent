@@ -47,8 +47,14 @@ The host owns permissions, task classification, installed sources and session id
    `--adopt-cli-session <uuid>` binds a provider session started outside the launcher
    (for example an interactive Claude Code session) and prints its registry session ID;
    a Claude Code session must exist in the workspace's project, or adoption is refused.
-   `--status` prints the repository's sessions: state, PID, elapsed time and, for Claude
-   Code, the last main-thread message and tool call from its transcript.
+   The same provider ID under another agent or canonical issue is refused. The first run
+   after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
+   the cumulative figures as the session total and the baseline for later runs.
+   `--status` reads the registry without writing it and prints the repository's
+   sessions: state, PID, elapsed time (until `finished_at` for a finished run) and, for
+   Claude Code, the last main-thread message and tool call from its transcript.
+   Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`, else its
+   `HOME`/.claude.
    An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes
    its reason from the first output line.
 3. Multiple read-only recipients share one host snapshot; execution has one writer.

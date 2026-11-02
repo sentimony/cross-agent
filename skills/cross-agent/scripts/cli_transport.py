@@ -157,14 +157,15 @@ _CLAUDE_POLICY = (
 
 # Execution profile for a delegated Claude Code orchestrator: it keeps the user and
 # project settings (hooks, skills, instructions) and runs its own workspace tools and
-# subagents, but has no MCP servers and no web access. Unlisted tools are denied
-# because no one answers permission prompts.
+# subagents, but has no MCP servers and no web access. --tools limits the available
+# set to the allowlist, so inherited settings cannot grant an unlisted tool.
 _CLAUDE_EXEC_TOOLS = ("Bash,Read,Grep,Glob,Edit,Write,NotebookEdit,Agent,Skill,"
                       "TaskStop,TodoWrite")
 
 
 _CLAUDE_EXEC_POLICY = (
     "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+    "--tools", _CLAUDE_EXEC_TOOLS,
     "--allowedTools", _CLAUDE_EXEC_TOOLS,
     "--disallowedTools", "WebFetch,WebSearch,mcp__*",
     "--strict-mcp-config",
@@ -896,7 +897,7 @@ def _target_total(cost_usd, rounds_previous, round_no) -> dict:
 def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills,
                 previous_run=None, previous=None, session=None,
                 expected_session=None, round_no: int = 1,
-                rounds_previous=None) -> dict:
+                rounds_previous=None, profile: str = "read-only") -> dict:
     """Assemble the usage.json record of one run.
 
     cost_usd is the CLI-reported cost and is used for claude only; the codex cost
@@ -905,6 +906,8 @@ def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills
     marks the session total incomplete. On a claude or antigravity resume tokens and
     cost_usd are the cumulative session figures the CLI reports; session and
     expected_session are the reported and the resumed session ids (see resume_usage).
+    profile is the run's profile: Claude Code execution enables skills, read-only
+    disables them.
     """
     priced = REVIEWERS[reviewer]["priced"]
     # Claude and agy report cumulative usage on resume; codex reports this run only.
@@ -926,7 +929,8 @@ def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills
         if cost_usd is None and tokens is not None:
             cost_usd = claude_cost(model, tokens)
             basis = "price-table" if cost_usd is not None else "unknown"
-        skills, note = [], "disabled by policy"
+        skills = []
+        note = "not detected" if profile == "execution" else "disabled by policy"
     return {
         "schema_version": USAGE_SCHEMA_VERSION,
         "reviewer": reviewer,

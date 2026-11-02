@@ -18,6 +18,18 @@
    main-thread message and tool call of a Claude Code session.
 6. Tell orchestrators to ask the owner through `USER_INPUT_REQUIRED` with a handoff, and
    give `BLOCKED` results the first output line as their reason.
+7. Limit Claude Code execution tools with `--tools` as well as `--allowedTools`, so
+   inherited settings cannot make an unlisted tool available.
+8. Record `model_basis` in the observed identity (`launch-flag+modelUsage` for Claude
+   Code, `provider` when the envelope names the model).
+9. Measure Claude Code resume rounds again: `identity_attested` ignores the effort that
+   `claude -p` never reports.
+10. Mark adopted sessions; their first run reports unknown round usage and keeps the
+    cumulative figures as the session total and later baseline.
+11. Find Claude Code transcripts for adoption and status through the child environment.
+12. Make `--status` read-only and stop the elapsed time of a finished run at `finished_at`.
+13. Refuse adopting a provider session already owned under another canonical issue.
+14. Report `skills_note: not detected` for Claude Code execution usage.
 
 ## 0.0.1 - 2026-11-01
 

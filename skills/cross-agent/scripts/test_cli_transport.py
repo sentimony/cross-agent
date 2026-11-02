@@ -50,6 +50,9 @@ class ClaudeOrchestratorProfile(unittest.TestCase):
         allowed = argv[argv.index('--allowedTools') + 1].split(',')
         for tool in ('Bash', 'Edit', 'Write', 'Agent', 'Skill'):
             self.assertIn(tool, allowed)
+        # --tools limits availability; --allowedTools alone only grants permission.
+        self.assertEqual(argv[argv.index('--tools') + 1], argv[argv.index('--allowedTools') + 1])
+        self.assertEqual(argv[argv.index('--tools') + 1], transport._CLAUDE_EXEC_TOOLS)
         self.assertNotIn('--restricted', argv)
         self.assertNotIn('--safe-mode', argv)
         self.assertIn('--strict-mcp-config', argv)
@@ -87,6 +90,14 @@ class ClaudeOrchestratorProfile(unittest.TestCase):
                                            'low', SESSION)
         self.assertIn('--restricted', argv)
         self.assertEqual(argv[argv.index('--setting-sources') + 1], '')
+
+    def test_skills_note_follows_the_claude_profile(self):
+        tokens = dict.fromkeys(transport.TOKEN_KEYS, 1)
+        execution = transport.build_usage('claude-code', 'claude-opus-5-5', 'high', tokens, 0.5,
+                                          [], profile='execution')
+        read_only = transport.build_usage('claude-code', 'claude-opus-5-5', 'high', tokens, 0.5, [])
+        self.assertEqual(execution['skills_note'], 'not detected')
+        self.assertEqual(read_only['skills_note'], 'disabled by policy')
 
     def test_pass_env_reaches_the_child_and_nested_launch_stays_blocked(self):
         env = transport.reviewer_environment({'PATH': '/bin', 'SSH_AUTH_SOCK': '/s', 'SECRET': 'x'},
@@ -231,6 +242,158 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'modelUsage'
         self.assertEqual(row['pid'], os.getpid())
         self.assertEqual(row['last_text'], 'Starting W1')
         self.assertEqual(row['last_tool'], 'Bash: Show status')
+
+    def usage_fixture(self, calls_before=0):
+        """claude -p fake reporting cumulative session usage: 100 input, 10 output, 0.25 USD per call."""
+        counter = self.root / 'calls'
+        counter.write_text(str(calls_before))
+        (self.bin / 'claude').write_text('''#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+sys.stdin.read()
+args=sys.argv[1:]
+sid=args[args.index('--session-id')+1] if '--session-id' in args else args[args.index('--resume')+1]
+counter=Path(os.environ['HOME'])/'calls'
+n=int(counter.read_text())+1
+counter.write_text(str(n))
+print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_usd':0.25*n,
+ 'modelUsage':{'claude-opus-5-5':{'inputTokens':100*n,'outputTokens':10*n}},
+ 'result':json.dumps({'schema_version':1,'status':'COMPLETED','output':'ok'})}))
+''')
+
+    def test_claude_resume_measures_the_round_without_reported_effort(self):
+        self.usage_fixture()
+        first = dispatch(parse_request('claude opus high [one]'), self.host).results[0]
+        self.assertEqual(first['status'], 'COMPLETED', first)
+        self.assertIs(first['usage']['identity_attested'], True)
+        self.assertEqual(first['usage']['skills_note'], 'not detected')
+        second = dispatch(parse_request('claude opus high [two] --session ' + first['session_id']),
+                          self.host).results[0]
+        self.assertEqual(second['status'], 'COMPLETED', second)
+        usage = second['usage']
+        self.assertIsNone(usage['delta_reason'])
+        self.assertEqual(usage['tokens'], {'input': 100, 'cached_input': 0, 'cache_write': 0,
+                                           'output': 10, 'reasoning': 0})
+        self.assertEqual(usage['cost_usd'], 0.25)
+        self.assertEqual(usage['session_total']['cost_usd'], 0.5)
+
+    def test_first_run_of_an_adopted_session_has_no_round_baseline(self):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import _registry, adopt_session
+        self.usage_fixture(calls_before=3)
+        agent = resolve_agents(parse_request('claude opus high [x]'), self.host.config, 'claude')[0]
+        sid = adopt_session(self.host.task_context, agent, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+        with _registry(self.host.task_context) as data:
+            self.assertIs(data['sessions'][sid]['adopted'], True)
+        first = dispatch(parse_request('claude opus high [one] --session ' + sid), self.host).results[0]
+        self.assertEqual(first['status'], 'COMPLETED', first)
+        usage = first['usage']
+        self.assertIsNone(usage['tokens'])
+        self.assertIsNone(usage['cost_usd'])
+        self.assertEqual(usage['delta_reason'], 'adopted session: no baseline')
+        self.assertFalse(usage['target_total']['complete'])
+        self.assertEqual(usage['session_total']['tokens']['input'], 400)
+        self.assertEqual(usage['session_total']['cost_usd'], 1.0)
+        self.assertTrue(usage['session_total']['complete'])
+        second = dispatch(parse_request('claude opus high [two] --session ' + sid), self.host).results[0]
+        self.assertEqual(second['usage']['tokens']['input'], 100)
+        self.assertEqual(second['usage']['cost_usd'], 0.25)
+        self.assertIsNone(second['usage']['delta_reason'])
+
+    def test_model_basis_records_how_the_model_was_observed(self):
+        from cross_agent import _provider
+        run = self.root / 'basis'
+        run.mkdir()
+        result = json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'output': 'ok'})
+        for envelope, basis in (
+                ({'session_id': SESSION, 'modelUsage': {'claude-opus-5-5': {}}}, 'launch-flag+modelUsage'),
+                ({'session_id': SESSION, 'model': 'claude-opus-5-5'}, 'provider'),
+                ({'session_id': SESSION, 'modelUsage': {'claude-sonnet-5-5': {}}}, None)):
+            with self.subTest(basis=basis):
+                (run / 'stdout.json').write_text(json.dumps(dict(envelope, result=result)))
+                _, observed, _ = _provider('claude-code', run, 'claude-opus-5-5')
+                self.assertEqual(observed['model_basis'], basis)
+
+    def test_adopt_under_another_issue_is_owned_and_same_issue_is_idempotent(self):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import StateError, adopt_session
+        agent = resolve_agents(parse_request('claude opus high [x]'), self.host.config, 'claude')[0]
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        issue = replace(self.host.task_context, canonical_issue='42')
+        sid = adopt_session(issue, agent, cli)
+        self.assertEqual(adopt_session(issue, agent, cli), sid)
+        for other in (replace(issue, canonical_issue='43'), self.host.task_context):
+            with self.subTest(issue=other.canonical_issue):
+                with self.assertRaisesRegex(StateError, 'PROVIDER_SESSION_OWNED'):
+                    adopt_session(other, agent, cli)
+
+    def test_transcript_lookup_uses_the_child_environment(self):
+        import os
+        from unittest.mock import patch
+        from cross_agent import adopt, claude_transcript, status
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        child_home = self.root / 'child-home'
+        config_dir = self.root / 'child-config'
+        row = {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'child'}]}}
+        for env, root in (({'HOME': str(child_home)}, child_home / '.claude'),
+                          ({'HOME': str(child_home), 'CLAUDE_CONFIG_DIR': str(config_dir)}, config_dir)):
+            with self.subTest(root=root):
+                registry = self.root / ('registry-' + root.name)
+                host = replace(self.host, environment=dict(self.host.environment, **env),
+                               task_context=replace(self.host.task_context, registry_path=str(registry)))
+                path = claude_transcript(self.root, cli, root)
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(row) + '\n')
+                ambient = {k: v for k, v in os.environ.items() if k != 'CLAUDE_CONFIG_DIR'}
+                ambient['HOME'] = str(self.root / 'launcher-home')
+                with patch.dict(os.environ, ambient, clear=True):
+                    sid = adopt(host, parse_request('claude opus high [x]'), cli)
+                    [entry] = status(host)['sessions']
+                self.assertEqual(entry['session_id'], sid)
+                self.assertEqual(entry['last_text'], 'child')
+
+    def adopted_finished_run(self, started_at, finished_at):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import _registry, adopt_session, finish_session, reserve_session, SessionDecision
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        agent = resolve_agents(parse_request('claude opus high [x]'), self.host.config, 'claude')[0]
+        sid = adopt_session(self.host.task_context, agent, cli)
+        with _registry(self.host.task_context) as data:
+            task_id = data['sessions'][sid]['task_id']
+        decision = SessionDecision('READY', 'RESUME', task_id, sid, True, cli, 'claude-code',
+                                   'claude-opus-5-5', 'high', 'execution', 'execution')
+        run_id = reserve_session(self.host.task_context, decision, str(self.root / 'run'))
+        finish_session(self.host.task_context, sid, run_id, 'completed')
+        with _registry(self.host.task_context) as data:
+            data['sessions'][sid]['runs'][-1].update(started_at=started_at, finished_at=finished_at)
+        return sid
+
+    def test_status_elapsed_of_a_finished_run_stops_at_finished_at(self):
+        import time
+        from cross_agent import status
+        started = time.time() - 86400
+        self.adopted_finished_run(started, started + 10)
+        [row] = status(self.host)['sessions']
+        self.assertEqual(row['state'], 'completed')
+        self.assertEqual(row['elapsed_seconds'], 10)
+
+    def test_status_never_writes_the_registry(self):
+        import os
+        import time
+        from cross_agent import status
+        started = time.time() - 60
+        self.adopted_finished_run(started, started + 1)
+        registry = Path(self.host.task_context.registry_path)
+        before = (sorted(p.name for p in registry.iterdir()), (registry / 'registry.json').read_bytes(),
+                  os.stat(registry / 'registry.json').st_mtime_ns, os.stat(registry / 'registry.json').st_ino)
+        self.assertEqual(len(status(self.host)['sessions']), 1)
+        after = (sorted(p.name for p in registry.iterdir()), (registry / 'registry.json').read_bytes(),
+                 os.stat(registry / 'registry.json').st_mtime_ns, os.stat(registry / 'registry.json').st_ino)
+        self.assertEqual(after, before)
+        missing = replace(self.host, task_context=replace(self.host.task_context,
+                                                          registry_path=str(self.root / 'absent')))
+        self.assertEqual(status(missing)['sessions'], [])
+        self.assertFalse((self.root / 'absent').exists())
 
     def test_without_pass_env_the_variable_stays_out(self):
         host = replace(self.host, pass_env=())
