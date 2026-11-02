@@ -25,7 +25,8 @@
 9. Measure Claude Code resume rounds again: `identity_attested` ignores the effort that
    `claude -p` never reports.
 10. Mark adopted sessions; their first run reports unknown round usage and keeps the
-    cumulative figures as the session total and later baseline.
+    cumulative figures as the session total and later baseline. An adopted session
+    with per-round usage (Codex) keeps measured rounds but never a complete session total.
 11. Find Claude Code transcripts for adoption and status through the child environment.
 12. Make `--status` read-only and stop the elapsed time of a finished run at `finished_at`.
 13. Refuse adopting a provider session already owned under another canonical issue.

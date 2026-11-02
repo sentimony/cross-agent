@@ -49,7 +49,8 @@ The host owns permissions, task classification, installed sources and session id
    a Claude Code session must exist in the workspace's project, or adoption is refused.
    The same provider ID under another agent or canonical issue is refused. The first run
    after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
-   the cumulative figures as the session total and the baseline for later runs.
+   the cumulative figures as the session total and the baseline for later runs. An
+   adopted Codex session keeps measured rounds, but its session total stays incomplete.
    `--status` reads the registry without writing it and prints the repository's
    sessions: state, PID, elapsed time (until `finished_at` for a finished run) and, for
    Claude Code, the last main-thread message and tool call from its transcript.

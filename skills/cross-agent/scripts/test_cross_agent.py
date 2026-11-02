@@ -254,6 +254,26 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         third = dispatch(parse_request('codex --new [read]'), self.host).results[0]
         self.assertEqual(third['status'], 'COMPLETED')
 
+    def test_adopted_per_round_session_total_is_never_complete(self):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import adopt_session
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "value={'schema_version':1"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "print(json.dumps({'type':'turn.completed','usage':"
+                           "{'input_tokens':100,'output_tokens':10}}),flush=True)\n" + old))
+        agent = resolve_agents(parse_request('codex [x]'), self.host.config, 'claude')[0]
+        sid = adopt_session(self.host.task_context, agent, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+        for _ in range(2):
+            entry = dispatch(parse_request('codex [read] --session ' + sid), self.host).results[0]
+            self.assertEqual(entry['status'], 'COMPLETED', entry)
+            self.assertIs(entry['usage']['identity_attested'], True)
+            self.assertIsNotNone(entry['usage']['tokens'])
+            self.assertIs(entry['usage']['session_total']['complete'], False)
+        fresh = dispatch(parse_request('codex --new [read]'), self.host).results[0]
+        self.assertIs(fresh['usage']['session_total']['complete'], True)
+
     def test_cancel_stops_remaining_recipients(self):
         from unittest.mock import patch
         with patch('cross_agent._process', return_value=('CANCELLED', 'SIGNAL')) as process:

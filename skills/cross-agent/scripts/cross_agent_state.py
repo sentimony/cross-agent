@@ -260,6 +260,8 @@ def read_registry(context):
     """Validated snapshot without the lock or a rewrite; writers replace atomically.
     A missing registry reads as empty and nothing is created."""
     path = _registry_dir(context)
+    # Lock-free read assumes every writer goes through _registry, which publishes a
+    # complete fsynced temporary file with os.replace; a reader never sees a partial file.
     try:
         directory = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except FileNotFoundError:

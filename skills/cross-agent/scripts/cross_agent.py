@@ -241,6 +241,9 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no, ado
         usage.update(tokens=None, cost_usd=None, cost_basis='unknown', prices_as_of=None,
                      target_total=transport._target_total(None, None, round_no),
                      delta_reason='adopted session: no baseline')
+    if adopted and agent.family == 'codex':
+        # Per-round usage is measured, but usage before adoption is unknown.
+        usage['session_total']['complete'] = False
     _write(run / 'usage.json', usage)
     return usage
 
