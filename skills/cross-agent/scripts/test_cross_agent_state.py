@@ -11,6 +11,61 @@ from cross_agent_state import (TaskContext, StateError, select_session, reserve_
                                update_session, finish_session)
 
 
+class SnapshotReadTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve() / 'private'
+        self.dir.mkdir(mode=0o700)
+        self.ctx = TaskContext(str(self.dir), 'repo:canonical', 'conversation')
+        self.write({})
+
+    def write(self, tasks):
+        """Publish like the locked writer: a complete private file swapped in with os.replace."""
+        data = {'schema_version': 1, 'tasks': tasks, 'sessions': {}, 'conversations': {}}
+        staging = self.dir / '.staging'
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(data, stream)
+        os.replace(staging, self.dir / 'registry.json')
+
+    def replacing_fstat(self, times):
+        """fstat that lets a writer replace registry.json right after the reader's open."""
+        import stat
+        real = os.fstat
+        calls = []
+        def fstat(fd):
+            if stat.S_ISREG(real(fd).st_mode) and len(calls) < times:
+                calls.append(fd)
+                self.write({'t': {'task_id': 't', 'repo': 'repo:canonical', 'canonical_issue': None}})
+            return real(fd)
+        return fstat, calls
+
+    def test_concurrent_replace_between_open_and_fstat_reads_the_new_registry(self):
+        from unittest.mock import patch
+        from cross_agent_state import read_registry
+        fstat, calls = self.replacing_fstat(1)
+        with patch('cross_agent_state.os.fstat', side_effect=fstat):
+            data = read_registry(self.ctx)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(list(data['tasks']), ['t'])
+
+    def test_snapshot_retries_are_bounded(self):
+        from unittest.mock import patch
+        from cross_agent_state import read_registry
+        fstat, calls = self.replacing_fstat(10)
+        with patch('cross_agent_state.os.fstat', side_effect=fstat):
+            with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
+                read_registry(self.ctx)
+        self.assertEqual(len(calls), 3)
+
+    def test_snapshot_still_rejects_extra_hard_links(self):
+        from cross_agent_state import read_registry
+        os.link(self.dir / 'registry.json', self.dir / 'alias.json')
+        with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
+            read_registry(self.ctx)
+
+
 class StateTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

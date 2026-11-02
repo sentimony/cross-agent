@@ -238,12 +238,34 @@ def _registry_dir(context):
     return path
 
 
-def _load(directory):
+def _open_snapshot(directory, attempts=3):
+    """Open registry.json for the lock-free read. A writer's os.replace between open
+    and fstat leaves the opened old inode with no links: reopen the current name.
+    Several links and every other unsafe case are still refused."""
+    for _ in range(attempts):
+        try:
+            fd = os.open('registry.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        except OSError as exc:
+            raise StateError('UNSAFE_REGISTRY_PATH') from exc
+        try:
+            st = os.fstat(fd)
+            if not (stat.S_ISREG(st.st_mode) and st.st_nlink == 0):
+                _private(st)
+                return fd
+        except BaseException:
+            os.close(fd)
+            raise
+        os.close(fd)
+    raise StateError('UNSAFE_REGISTRY_PATH')
+
+
+def _load(directory, snapshot=False):
     try:
         os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
     except FileNotFoundError:
         return _empty()
-    fd = _open_private(directory, 'registry.json', os.O_RDONLY)
+    fd = (_open_snapshot(directory) if snapshot
+          else _open_private(directory, 'registry.json', os.O_RDONLY))
     try:
         with os.fdopen(fd, 'r', encoding='utf-8') as stream:
             raw = stream.read(8 * 1024 * 1024 + 1)
@@ -270,7 +292,7 @@ def read_registry(context):
         raise StateError('UNSAFE_REGISTRY_PATH') from exc
     try:
         _private(os.fstat(directory), True)
-        return _load(directory)
+        return _load(directory, snapshot=True)
     finally:
         os.close(directory)
 
