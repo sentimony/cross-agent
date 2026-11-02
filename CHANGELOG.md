@@ -32,7 +32,9 @@
 13. Refuse adopting a provider session already owned under another canonical issue.
 14. Report `skills_note: not detected` for Claude Code execution usage.
 15. Show an `estimate` of tokens and cost per Claude Code session in `--status`, summed
-    from its main and subagent transcripts; not billing data.
+    from its main and subagent transcripts; not billing data. Unreadable files and rows
+    without input/output counts mark it `complete: false`; the largest copy of a
+    message counts once.
 
 ## 0.0.1 - 2026-11-01
 

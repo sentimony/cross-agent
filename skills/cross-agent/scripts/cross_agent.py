@@ -592,7 +592,8 @@ def _transcript_tail(path, limit=262144):
             continue
         if not isinstance(row, dict) or row.get('type') != 'assistant' or row.get('isSidechain'):
             continue
-        content = (row.get('message') or {}).get('content')
+        message = row.get('message')
+        content = message.get('content') if isinstance(message, dict) else None
         for item in reversed(content if isinstance(content, list) else []):
             if not isinstance(item, dict):
                 continue
@@ -613,21 +614,49 @@ _ESTIMATE_KEYS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens'
                   'cache_read_input_tokens')
 
 
+def _count_or_none(value):
+    return value if type(value) is int and value >= 0 else None
+
+
+def _estimate_usage(row):
+    """(key, model, usage) of an assistant row; usage None when its required counts
+    are missing or invalid; None for any row that carries no assistant usage."""
+    if not isinstance(row, dict) or row.get('type') != 'assistant':
+        return None
+    message = row.get('message')
+    if not isinstance(message, dict) or not isinstance(message.get('usage'), dict):
+        return None
+    raw = message['usage']
+    usage = {name: _count_or_none(raw.get(name)) for name in ('input_tokens', 'output_tokens')}
+    for name in ('cache_creation_input_tokens', 'cache_read_input_tokens'):
+        # Cache counters are optional: absent or null is 0, anything else must be a count.
+        usage[name] = 0 if raw.get(name) is None else _count_or_none(raw[name])
+    if any(value is None for value in usage.values()):
+        usage = None
+    key = next((value for value in (message.get('id'), row.get('requestId'))
+                if isinstance(value, str) and value), None)
+    model = message.get('model') if isinstance(message.get('model'), str) else 'unknown'
+    return key, model, usage
+
+
 def transcript_estimate(path):
     """Estimated tokens and cost of a Claude Code session from its transcripts.
 
     Reads the main transcript and its subagents/agent-*.jsonl files line by line and
     sums message.usage of assistant rows per message.model. One API message spans
     several rows, so each message.id (else requestId, else the row) counts once across
-    all files; this also drops subagent rows a main file repeats. Prices come from
-    cli_transport; a model missing there makes the cost null. Not billing data.
+    all files, as its copy with the largest output_tokens; this also drops subagent
+    rows a main file repeats. A row without valid input/output counts, or an
+    unreadable subagent file, makes the estimate incomplete; an unreadable main
+    transcript gives None. Prices come from cli_transport; a model missing there
+    makes the cost null. Not billing data.
     """
     path = Path(path)
     if not path.is_file():
         return None
     subagents = path.with_suffix('') / 'subagents'
     extra = sorted(subagents.glob('agent-*.jsonl')) if subagents.is_dir() else []
-    seen, by_model = set(), {}
+    best, complete, unread = {}, True, []
     for index, source in enumerate([path] + extra):
         try:
             with open(source, 'rb') as handle:
@@ -635,26 +664,28 @@ def transcript_estimate(path):
                     if b'"usage"' not in line:
                         continue
                     try:
-                        row = json.loads(line)
+                        parsed = _estimate_usage(json.loads(line))
                     except ValueError:
                         continue
-                    message = row.get('message') if isinstance(row, dict) else None
-                    if row.get('type') != 'assistant' or not isinstance(message, dict):
+                    if parsed is None:
                         continue
-                    usage = message.get('usage')
-                    if not isinstance(usage, dict) or any(
-                            not (usage.get(k) is None or (type(usage[k]) is int and usage[k] >= 0))
-                            for k in _ESTIMATE_KEYS):
+                    key, model, usage = parsed
+                    if usage is None:
+                        complete = False
                         continue
-                    key = message.get('id') or row.get('requestId') or (index, number)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    totals = by_model.setdefault(str(message.get('model')), dict.fromkeys(_ESTIMATE_KEYS, 0))
-                    for name in _ESTIMATE_KEYS:
-                        totals[name] += usage.get(name) or 0
+                    key = key or (index, number)
+                    if key not in best or usage['output_tokens'] > best[key][1]['output_tokens']:
+                        best[key] = (model, usage)
         except OSError:
-            continue
+            if source == path:
+                return None
+            complete = False
+            unread.append(str(source))
+    by_model = {}
+    for model, usage in best.values():
+        totals = by_model.setdefault(model, dict.fromkeys(_ESTIMATE_KEYS, 0))
+        for name in _ESTIMATE_KEYS:
+            totals[name] += usage[name]
     tokens, cost, unpriced, models = dict.fromkeys(_ESTIMATE_KEYS, 0), 0.0, [], {}
     for model, totals in sorted(by_model.items()):
         # Zero-usage rows (for example <synthetic> notices) cost nothing and name no model.
@@ -674,7 +705,7 @@ def transcript_estimate(path):
     return {'tokens': tokens, 'cost_usd': None if unpriced else round(cost, 4),
             'by_model': models, 'basis': 'transcript-estimate',
             'prices_as_of': transport.PRICES_AS_OF, 'subagent_files': len(extra),
-            'unpriced_models': unpriced}
+            'unpriced_models': unpriced, 'complete': complete, 'unread_files': unread}
 
 
 def _elapsed(run):

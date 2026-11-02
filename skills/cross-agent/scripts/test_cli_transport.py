@@ -430,6 +430,8 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
         self.assertEqual(estimate['prices_as_of'], transport.PRICES_AS_OF)
         self.assertEqual(estimate['subagent_files'], 0)
         self.assertEqual(estimate['unpriced_models'], [])
+        self.assertIs(estimate['complete'], True)
+        self.assertEqual(estimate['unread_files'], [])
 
     def test_estimate_includes_subagent_transcripts_once(self):
         main = [self.usage_row('m1', input_tokens=10, output_tokens=1),
@@ -451,6 +453,51 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
         self.assertIsNone(estimate['cost_usd'])
         self.assertEqual(estimate['unpriced_models'], ['claude-mystery-1'])
         self.assertIsNotNone(estimate['by_model']['claude-opus-5-5']['cost_usd'])
+
+    def test_unreadable_transcripts_never_look_complete(self):
+        import os
+        if os.geteuid() == 0:
+            self.skipTest('root reads mode 000 files')
+        main = [self.usage_row('m1', input_tokens=10, output_tokens=1)]
+        sub = [self.usage_row('s1', input_tokens=100, output_tokens=10)]
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        from cross_agent import claude_transcript, transcript_estimate
+        path = claude_transcript(self.root, cli, self.root / '.claude')
+        self.estimate_for(main, [sub])
+        agent_file = path.with_suffix('') / 'subagents' / 'agent-0.jsonl'
+        agent_file.chmod(0)
+        self.addCleanup(agent_file.chmod, 0o600)
+        partial = transcript_estimate(path)
+        self.assertIs(partial['complete'], False)
+        self.assertEqual(partial['unread_files'], [str(agent_file)])
+        self.assertEqual(partial['tokens']['input_tokens'], 10)
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o600)
+        self.assertIsNone(transcript_estimate(path))
+
+    def test_row_without_required_counts_is_unknown_and_does_not_hide_a_full_copy(self):
+        partial = self.usage_row('m1', input_tokens=5)
+        partial['message']['usage']['output_tokens'] = None
+        estimate = self.estimate_for([partial, self.usage_row('m1', input_tokens=10, output_tokens=3),
+                                      self.usage_row('m2', output_tokens=7)])
+        self.assertIs(estimate['complete'], False)
+        self.assertEqual(estimate['tokens']['input_tokens'], 10)
+        self.assertEqual(estimate['tokens']['output_tokens'], 3)
+
+    def test_non_object_rows_and_non_string_ids_are_skipped_safely(self):
+        odd_id = self.usage_row('m1', input_tokens=10, output_tokens=1)
+        odd_id['message']['id'] = ['not', 'a', 'string']
+        odd_message = {'type': 'assistant', 'message': ['usage']}
+        estimate = self.estimate_for([['usage'], 'usage', odd_message, odd_id, odd_id])
+        self.assertIs(estimate['complete'], True)
+        # The list id falls back to requestId, so both copies count once.
+        self.assertEqual(estimate['tokens']['input_tokens'], 10)
+
+    def test_largest_output_copy_of_a_message_wins(self):
+        estimate = self.estimate_for([self.usage_row('m1', input_tokens=10, output_tokens=1),
+                                      self.usage_row('m1', input_tokens=10, output_tokens=50),
+                                      self.usage_row('m1', input_tokens=10, output_tokens=20)])
+        self.assertEqual(estimate['tokens']['output_tokens'], 50)
 
     def test_estimate_is_null_without_a_transcript(self):
         self.assertIsNone(self.estimate_for(None))

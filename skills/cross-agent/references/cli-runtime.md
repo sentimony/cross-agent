@@ -29,7 +29,11 @@
    without writing anything: the main `<projects>/<slug>/<id>.jsonl` and every
    `<id>/subagents/agent-*.jsonl`, read line by line. It sums `message.usage` of
    assistant rows per `message.model`, counting each `message.id` (else `requestId`)
-   once across the files, so subagent rows a main file repeats count once. Cost uses
+   once across the files as its copy with the largest `output_tokens`, so subagent rows
+   a main file repeats count once. A row without valid `input_tokens`/`output_tokens`
+   is not counted and sets `complete: false`; missing cache counters count as 0. An
+   unreadable subagent file sets `complete: false` and is listed in `unread_files`; an
+   unreadable main transcript gives a null estimate. Non-object rows are skipped. Cost uses
    the `cli_transport` price table with its cache-write and cache-hit rates; a model
    missing there makes `cost_usd` null and is listed in `unpriced_models`, and
    zero-usage rows such as `<synthetic>` are skipped. The result (`basis:
