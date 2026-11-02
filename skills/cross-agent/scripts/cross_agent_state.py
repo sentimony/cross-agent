@@ -363,6 +363,37 @@ def select_session(request, task_context, agent, role, profile):
                                agent.family, agent.model, agent.effort, role, profile)
 
 
+def adopt_session(context, agent, cli_session_id):
+    """Bind an existing provider session, started outside the launcher, to a new registry
+    session so later runs resume it. The trusted host supplies the ID; repeating the
+    call with the same agent returns the same session, any other owner is refused."""
+    try:
+        provider = str(uuid.UUID(cli_session_id))
+    except (TypeError, ValueError, AttributeError):
+        raise StateError('INVALID_PROVIDER_SESSION')
+    if provider != cli_session_id.lower():
+        raise StateError('INVALID_PROVIDER_SESSION')
+    ctx = context
+    key = dict(repo=ctx.repo, family=agent.family, model=agent.model, effort=agent.effort,
+               role=agent.role, profile=agent.profile)
+    with _registry(ctx) as data:
+        for session in data['sessions'].values():
+            if session['family'] == agent.family and provider in _provider_bindings(session):
+                if all(session[k] == v for k, v in key.items()):
+                    return session['session_id']
+                raise StateError('PROVIDER_SESSION_OWNED')
+        issue = ctx.canonical_issue
+        task_id = ('issue:' + quote(json.dumps([ctx.repo, issue], separators=(',', ':')), safe='')
+                   if issue else str(uuid.uuid4()))
+        data['tasks'].setdefault(task_id, {'task_id': task_id, 'repo': ctx.repo,
+                                           'canonical_issue': issue})
+        sid = str(uuid.uuid4())
+        data['sessions'][sid] = dict(key, task_id=task_id, session_id=sid,
+                                     cli_session_id=provider, observed_cli_session_id=provider,
+                                     status='idle', runs=[])
+        return sid
+
+
 def _session(data, context, session_id):
     session = data['sessions'].get(session_id)
     if not session or session['repo'] != context.repo:

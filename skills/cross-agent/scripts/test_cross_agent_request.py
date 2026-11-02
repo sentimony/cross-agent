@@ -153,8 +153,9 @@ class BundledDefaultTests(unittest.TestCase):
         writer = r.resolve_agents(r.parse_request('[a]'), execution, 'claude-code')
         self.assertEqual([(c.family, c.model, c.effort) for c in writer],
                          [('codex', 'gpt-6.1-sol', 'medium')])
-        with self.assertRaises(r.UnavailableError):
-            r.resolve_agents(r.parse_request('[a] claude'), execution, 'codex')
+        # Config allows a Claude Code writer; transport still requires an orchestrate policy.
+        orchestrator = r.resolve_agents(r.parse_request('[a] claude'), execution, 'codex')[0]
+        self.assertEqual((orchestrator.family, orchestrator.profile), ('claude-code', 'execution'))
 
 
 if __name__ == '__main__': unittest.main()

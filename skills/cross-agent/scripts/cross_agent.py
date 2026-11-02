@@ -9,6 +9,7 @@ from pathlib import Path
 import signal
 import subprocess
 import threading
+import time
 import uuid
 
 import cross_agent_state as state_store
@@ -32,6 +33,7 @@ class HostContext:
     installed_skills: dict = field(default_factory=dict)
     assignment_kind: str = 'consultation'
     environment: object = None
+    pass_env: tuple = ()
     timeout_seconds: float = 600
     kill_grace_seconds: float = 1
     policy: object = None
@@ -124,7 +126,7 @@ def _process(argv, brief, run, host, env):
             signal.signal(sig, handler)
 
 
-def _provider(family, run):
+def _provider(family, run, requested_model=None):
     """Read only provider envelope fields, never identity in assistant content."""
     raw = (run / 'stdout.json').read_text('utf-8', errors='replace')
     observed = {}
@@ -163,6 +165,12 @@ def _provider(family, run):
             raise ValueError('invalid provider session ID')
         for dest, source in (('actual_model', 'model'), ('actual_effort', 'effort')):
             observed[dest] = payload.get(source)
+        # claude -p has no model field; its envelope lists the models it billed in
+        # modelUsage (subagents add theirs), so only the requested model's presence counts.
+        model_usage = payload.get('modelUsage')
+        if (family == 'claude-code' and observed['actual_model'] is None
+                and isinstance(model_usage, dict) and requested_model in model_usage):
+            observed['actual_model'] = requested_model
         if family == 'claude-code':
             answer, parsed = transport.parse_claude_output(raw)
             if payload.get('is_error'):
@@ -265,7 +273,19 @@ def _owner_host(host, request):
 
 
 def _brief(request, host, role, family):
-    lines = ['You are a delegated agent. Never dispatch cross-agent or another agent.',
+    orchestrator = (family == 'claude-code' and host.policy is not None
+                    and 'orchestrate' in getattr(host.policy, 'local_actions', ()))
+    delegation = ('You are a delegated orchestrator. Never dispatch cross-agent; your own '
+                  'subagents and the review commands the assignment names are allowed.'
+                  if orchestrator else
+                  'You are a delegated agent. Never dispatch cross-agent or another agent.')
+    lines = [delegation]
+    if orchestrator:
+        lines.append('No user is attached. A decision for the owner is status USER_INPUT_REQUIRED '
+                     'with handoff question, options, evidence and consultants (lists, may be '
+                     'empty); put your recommendation first in options. BLOCKED is only for a '
+                     'blocker no answer can lift; start its output with "Blocker: <one line>".')
+    lines += [
              'Return only JSON: schema_version=1, status, output (text).',
              'Statuses: ' + ', '.join(sorted(STATUSES)) + '.',
              'For consultation/user input include handoff: question, options, evidence, consultants.',
@@ -410,7 +430,8 @@ def dispatch(request, host_context):
                            cli_id, profile=decision.profile, context=context)
             if agent.family == 'antigravity':
                 transport.check_agy_isolation(env)
-            child_env = transport.reviewer_environment(env, agent.family, context=context)
+            child_env = transport.reviewer_environment(env, agent.family, pass_env=host.pass_env,
+                                                       context=context)
             entry['status'], entry['reason'] = _process(argv, brief, run, host, child_env)
             cancelled = entry['status'] == 'CANCELLED' or entry['reason'] == 'PROCESS_CLEANUP_UNCONFIRMED'
             # A rejected/failed completion can still have performed authorized
@@ -425,7 +446,7 @@ def dispatch(request, host_context):
                     raise
                 entry.setdefault('metadata_errors', []).append(str(exc))
             try:
-                text, observed, reported = _provider(agent.family, run)
+                text, observed, reported = _provider(agent.family, run, agent.model)
                 entry['observed_identity'] = observed
                 entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run, round_no)
                 entry['artifacts']['usage'] = str(run / 'usage.json')
@@ -435,7 +456,8 @@ def dispatch(request, host_context):
                 entry.setdefault('metadata_errors', []).append(str(exc))
             if entry['status'] == 'COMPLETED':
                 identity = transport.validate_actual_identity(agent.model, agent.effort,
-                                      decision.cli_session_id if resume else None, observed)
+                                      decision.cli_session_id if resume else None, observed,
+                                      effort_reported=agent.family != 'claude-code')
                 entry.update(identity)
                 entry['usage']['identity_attested'] = all(value != 'unknown' for value in identity.values())
                 _write(run / 'usage.json', entry['usage'])
@@ -445,11 +467,15 @@ def dispatch(request, host_context):
                 if identity['cli_session_id'] != 'unknown':
                     fields['observed_cli_session_id'] = identity['cli_session_id']
                 # A session can resume only when provider identity is complete.
-                if identity['actual_model'] == 'unknown' or identity['actual_effort'] == 'unknown':
+                # claude -p never reports effort; its resume rests on session and model.
+                if identity['actual_model'] == 'unknown' or (
+                        identity['actual_effort'] == 'unknown' and agent.family != 'claude-code'):
                     fields.pop('cli_session_id', None)
                 if fields:
                     update_session(host.task_context, decision.session_id, run_id, **fields)
                 entry.update(_answer(text))
+                if entry['status'] == 'BLOCKED' and not entry.get('reason'):
+                    entry['reason'] = entry.get('output', '').strip().split('\n', 1)[0]
                 if host.integration is not None and entry['status'] == 'COMPLETED':
                     owner_host = dict(_owner_host(host, request), task_id=decision.task_id,
                                       session_id=decision.session_id, run_id=run_id,
@@ -499,6 +525,93 @@ def dispatch(request, host_context):
     return result
 
 
+def claude_transcript(workspace, cli_session_id, config_dir=None):
+    """Where Claude Code keeps a session started in workspace; resume finds only this one."""
+    root = Path(config_dir) if config_dir else Path(
+        os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+    slug = re.sub(r'[^A-Za-z0-9]', '-', str(Path(workspace)))
+    return root / 'projects' / slug / (cli_session_id + '.jsonl')
+
+
+def adopt(host, request, cli_session_id, config_dir=None):
+    if len(request.agent_groups) != 1:
+        raise ValueError('adopt requires exactly one agent')
+    agent = resolve_agents(request, host.config, host.host_family)[0]
+    if agent.family == 'claude-code':
+        transcript = claude_transcript(host.workspace, str(cli_session_id), config_dir)
+        if not transcript.is_file():
+            raise ValueError('ADOPT_TRANSCRIPT_MISSING: no session %s in the workspace project %s'
+                             % (cli_session_id, transcript.parent))
+    return state_store.adopt_session(host.task_context, agent, cli_session_id)
+
+
+def _transcript_tail(path, limit=262144):
+    """Last main-thread assistant text and tool call; subagent (sidechain) rows are skipped."""
+    text = tool = at = None
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - limit))
+            rows = handle.read().decode('utf-8', errors='replace').splitlines()
+    except OSError:
+        return None, None, None
+    for line in reversed(rows):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or row.get('type') != 'assistant' or row.get('isSidechain'):
+            continue
+        content = (row.get('message') or {}).get('content')
+        for item in reversed(content if isinstance(content, list) else []):
+            if not isinstance(item, dict):
+                continue
+            if tool is None and item.get('type') == 'tool_use':
+                given = item.get('input') if isinstance(item.get('input'), dict) else {}
+                tool = '%s: %s' % (item.get('name'), given.get('description') or given.get('command')
+                                   or given.get('file_path') or '')
+                tool = tool.rstrip(': ')[:200]
+            if text is None and item.get('type') == 'text' and item.get('text', '').strip():
+                text = item['text'].strip()[:500]
+        at = at or row.get('timestamp')
+        if text is not None and tool is not None:
+            break
+    return text, tool, at
+
+
+def status(host, config_dir=None):
+    """Read-only view of this repository's sessions, newest run first."""
+    rows = []
+    with state_store._registry(host.task_context) as data:
+        sessions = [dict(s, runs=list(s['runs'])) for s in data['sessions'].values()
+                    if s['repo'] == host.task_context.repo]
+        tasks = dict(data['tasks'])
+    for session in sessions:
+        run = session['runs'][-1] if session['runs'] else {}
+        alive = None
+        if run.get('status') == 'running':
+            try:
+                os.kill(run['pid'], 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+            except PermissionError:
+                alive = True
+        cli = session.get('cli_session_id') or session.get('observed_cli_session_id')
+        row = {'session_id': session['session_id'], 'task': tasks[session['task_id']]['canonical_issue']
+               or session['task_id'], 'family': session['family'], 'model': session['model'],
+               'effort': session['effort'], 'cli_session_id': cli, 'state': session['status'],
+               'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
+               'elapsed_seconds': round(time.time() - run['started_at']) if run.get('started_at') else None,
+               'last_text': None, 'last_tool': None, 'last_at': None}
+        if session['family'] == 'claude-code' and cli:
+            row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(
+                claude_transcript(host.workspace, cli, config_dir))
+        rows.append(row)
+    rows.sort(key=lambda r: r['started_at'] or 0, reverse=True)
+    return {'schema_version': 1, 'sessions': rows}
+
+
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'default.json'
 
 
@@ -507,7 +620,11 @@ def main(argv=None):
     parser.add_argument('--host-context', required=True, help='Explicit trusted host JSON, never child-provided')
     parser.add_argument('--config', default=str(DEFAULT_CONFIG),
                         help='Trusted agent configuration JSON; defaults to the bundled config/default.json')
-    parser.add_argument('request', help='One literal bracket request argument; no shell evaluation')
+    parser.add_argument('--adopt-cli-session', metavar='UUID',
+                        help='Bind this existing provider session to a registry session, print its ID and exit')
+    parser.add_argument('--status', action='store_true',
+                        help='Print the sessions of this repository with their last activity and exit')
+    parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
     args = parser.parse_args(argv)
     raw = json.loads(Path(args.host_context).read_text('utf-8'))
     task = TaskContext(**raw.pop('task_context'))
@@ -517,8 +634,23 @@ def main(argv=None):
         policy = raw['policy']
         policy['local_actions'] = tuple(policy['local_actions'])
         raw['policy'] = transport.VerifiedProfilePolicy(**policy)
+    if 'pass_env' in raw:
+        raw['pass_env'] = tuple(transport.validate_pass_env(raw['pass_env']))
     host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
                        task_context=task, **raw)
+    if args.status:
+        print(json.dumps(status(host), ensure_ascii=False, indent=1))
+        return 0
+    if args.request is None:
+        parser.error('request is required')
+    if args.adopt_cli_session:
+        try:
+            session_id = adopt(host, parse_request(args.request), args.adopt_cli_session)
+        except ValueError as exc:
+            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+            return 2
+        print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
+        return 0
     try:
         result = dispatch(parse_request(args.request), host)
     except (ValueError, transport.CrossReviewError) as exc:

@@ -6,7 +6,7 @@
 2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`, optional
    active task IDs/canonical issue), `host_family`, `workspace`, `artifact_root`,
    `target_identity`, trusted `assignment_kind`, `installed_skills`, `role`, `profile`,
-   optional timeout/policy/environment, answer and opaque `owner_context` object.
+   optional timeout/policy/environment/`pass_env` (variable names kept in the child), answer and opaque `owner_context` object.
    CLI configuration is a separate explicit
    schema1 file; child text cannot supply host fields.
 3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient results.

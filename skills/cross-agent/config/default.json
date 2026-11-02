@@ -8,8 +8,8 @@
       },
       "default_model": "claude-opus-5-5",
       "default_effort": "medium",
-      "profiles": ["read-only"],
-      "capabilities": {"read-only": "supported"}
+      "profiles": ["read-only", "execution"],
+      "capabilities": {"read-only": "supported", "execution": "supported"}
     },
     "codex": {
       "models": {

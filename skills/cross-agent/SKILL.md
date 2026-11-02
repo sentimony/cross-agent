@@ -27,7 +27,8 @@ The host owns permissions, task classification, installed sources and session id
    only host-allowlisted resources relative to its installed base. Missing/denied
    resources return `UNAVAILABLE`; never install a missing dependency implicitly.
 5. Use only configured agents and verified profiles. Without `--config` the launcher
-   uses the owner-attested [default config](config/default.json): Claude Code reviews,
+   uses the owner-attested [default config](config/default.json): Claude Code reviews or
+   orchestrates under an `orchestrate` host policy,
    Codex reviews or executes. An explicit `--config` replaces it. CLI presence or login
    supplies no authorization. Pending live capability remains unavailable.
 
@@ -43,6 +44,13 @@ The host owns permissions, task classification, installed sources and session id
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry
    and artifact roots. `--task new` separates a task; `--new` refreshes only its session.
    Explicit `--session` has exactly one recipient. Incompatible identities block resume.
+   `--adopt-cli-session <uuid>` binds a provider session started outside the launcher
+   (for example an interactive Claude Code session) and prints its registry session ID;
+   a Claude Code session must exist in the workspace's project, or adoption is refused.
+   `--status` prints the repository's sessions: state, PID, elapsed time and, for Claude
+   Code, the last main-thread message and tool call from its transcript.
+   An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes
+   its reason from the first output line.
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.
