@@ -25,5 +25,15 @@
    `disabled by policy` for read-only. A trusted host may attest bounded local
    workspace actions only after checking isolation, delegation denial and fresh/resume
    behavior. Unknown combinations return `UNAVAILABLE`.
-4. Native profile, actual provider identity, credits and billing require separate approved
+4. `--status` estimates a Claude Code session's tokens and cost from its transcripts,
+   without writing anything: the main `<projects>/<slug>/<id>.jsonl` and every
+   `<id>/subagents/agent-*.jsonl`, read line by line. It sums `message.usage` of
+   assistant rows per `message.model`, counting each `message.id` (else `requestId`)
+   once across the files, so subagent rows a main file repeats count once. Cost uses
+   the `cli_transport` price table with its cache-write and cache-hit rates; a model
+   missing there makes `cost_usd` null and is listed in `unpriced_models`, and
+   zero-usage rows such as `<synthetic>` are skipped. The result (`basis:
+   transcript-estimate`) is not billing data, includes usage from before adoption and
+   is null without a transcript; the exact launcher figures in `usage.json` are separate.
+5. Native profile, actual provider identity, credits and billing require separate approved
    checks. Fake CLI tests prove process plumbing only; requested argv is not actual identity.

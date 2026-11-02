@@ -55,7 +55,10 @@ The host owns permissions, task classification, installed sources and session id
    sessions: state, PID, elapsed time (until `finished_at` for a finished run) and, for
    Claude Code, the last main-thread message and tool call from its transcript.
    Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`, else its
-   `HOME`/.claude.
+   `HOME`/.claude. A Claude Code row also has `estimate`: tokens and cost summed from the
+   main and subagent transcripts (see [CLI runtime](references/cli-runtime.md)). It is
+   not billing data, covers the interactive part before adoption too, and stays
+   separate from the launcher's exact `usage.json` figures.
    An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes
    its reason from the first output line.
 3. Multiple read-only recipients share one host snapshot; execution has one writer.

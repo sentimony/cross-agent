@@ -31,6 +31,8 @@
 12. Make `--status` read-only and stop the elapsed time of a finished run at `finished_at`.
 13. Refuse adopting a provider session already owned under another canonical issue.
 14. Report `skills_note: not detected` for Claude Code execution usage.
+15. Show an `estimate` of tokens and cost per Claude Code session in `--status`, summed
+    from its main and subagent transcripts; not billing data.
 
 ## 0.0.1 - 2026-11-01
 

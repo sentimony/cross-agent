@@ -395,6 +395,66 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
         self.assertEqual(status(missing)['sessions'], [])
         self.assertFalse((self.root / 'absent').exists())
 
+    def estimate_for(self, main_rows, subagent_files=()):
+        """--status estimate of an adopted session with fake transcripts under a private config dir."""
+        from cross_agent import status
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import adopt_session
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        if main_rows is not None:
+            path = self.write_transcript(cli, main_rows)
+            for number, rows in enumerate(subagent_files):
+                folder = path.with_suffix('') / 'subagents'
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / ('agent-%d.jsonl' % number)).write_text(
+                    ''.join(json.dumps(row) + '\n' for row in rows))
+        agent = resolve_agents(parse_request('claude opus high [x]'), self.host.config, 'claude')[0]
+        adopt_session(self.host.task_context, agent, cli)
+        [row] = status(self.host, self.root / '.claude')['sessions']
+        return row['estimate']
+
+    @staticmethod
+    def usage_row(message_id, model='claude-opus-5-5', sidechain=False, **usage):
+        return {'type': 'assistant', 'isSidechain': sidechain, 'requestId': 'req-' + message_id,
+                'message': {'id': message_id, 'model': model, 'content': [], 'usage': usage}}
+
+    def test_estimate_counts_each_message_once_and_prices_cache_tokens(self):
+        usage = dict(input_tokens=1000, output_tokens=500, cache_creation_input_tokens=2000,
+                     cache_read_input_tokens=10000)
+        estimate = self.estimate_for([self.usage_row('m1', **usage), self.usage_row('m1', **usage),
+                                      'not json', {'type': 'user'}])
+        self.assertEqual(estimate['tokens'], usage)
+        # Opus 5.5 per million: 4.00 input, 5.00 cache write, 0.20 cache hit, 20.00 output.
+        self.assertEqual(estimate['cost_usd'], 0.026)
+        self.assertEqual(estimate['basis'], 'transcript-estimate')
+        self.assertEqual(estimate['prices_as_of'], transport.PRICES_AS_OF)
+        self.assertEqual(estimate['subagent_files'], 0)
+        self.assertEqual(estimate['unpriced_models'], [])
+
+    def test_estimate_includes_subagent_transcripts_once(self):
+        main = [self.usage_row('m1', input_tokens=10, output_tokens=1),
+                # A subagent row repeated in the main file must not count twice.
+                self.usage_row('s1', 'claude-sonnet-5-5', True, input_tokens=100, output_tokens=10)]
+        sub = [self.usage_row('s1', 'claude-sonnet-5-5', True, input_tokens=100, output_tokens=10),
+               self.usage_row('s2', 'claude-sonnet-5-5', True, input_tokens=200, output_tokens=20)]
+        estimate = self.estimate_for(main, [sub])
+        self.assertEqual(estimate['subagent_files'], 1)
+        self.assertEqual(estimate['tokens']['input_tokens'], 310)
+        self.assertEqual(estimate['by_model']['claude-sonnet-5-5']['tokens']['output_tokens'], 30)
+        self.assertEqual(estimate['by_model']['claude-opus-5-5']['tokens']['input_tokens'], 10)
+
+    def test_estimate_with_an_unpriced_model_has_no_cost(self):
+        estimate = self.estimate_for([
+            self.usage_row('m1', input_tokens=10, output_tokens=1),
+            self.usage_row('m2', 'claude-mystery-1', input_tokens=10, output_tokens=1),
+            self.usage_row('m3', '<synthetic>', input_tokens=0, output_tokens=0)])
+        self.assertIsNone(estimate['cost_usd'])
+        self.assertEqual(estimate['unpriced_models'], ['claude-mystery-1'])
+        self.assertIsNotNone(estimate['by_model']['claude-opus-5-5']['cost_usd'])
+
+    def test_estimate_is_null_without_a_transcript(self):
+        self.assertIsNone(self.estimate_for(None))
+
     def test_without_pass_env_the_variable_stays_out(self):
         host = replace(self.host, pass_env=())
         entry = dispatch(parse_request('claude opus high [orchestrate]'), host).results[0]

@@ -609,6 +609,74 @@ def _transcript_tail(path, limit=262144):
     return text, tool, at
 
 
+_ESTIMATE_KEYS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens',
+                  'cache_read_input_tokens')
+
+
+def transcript_estimate(path):
+    """Estimated tokens and cost of a Claude Code session from its transcripts.
+
+    Reads the main transcript and its subagents/agent-*.jsonl files line by line and
+    sums message.usage of assistant rows per message.model. One API message spans
+    several rows, so each message.id (else requestId, else the row) counts once across
+    all files; this also drops subagent rows a main file repeats. Prices come from
+    cli_transport; a model missing there makes the cost null. Not billing data.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return None
+    subagents = path.with_suffix('') / 'subagents'
+    extra = sorted(subagents.glob('agent-*.jsonl')) if subagents.is_dir() else []
+    seen, by_model = set(), {}
+    for index, source in enumerate([path] + extra):
+        try:
+            with open(source, 'rb') as handle:
+                for number, line in enumerate(handle):
+                    if b'"usage"' not in line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    message = row.get('message') if isinstance(row, dict) else None
+                    if row.get('type') != 'assistant' or not isinstance(message, dict):
+                        continue
+                    usage = message.get('usage')
+                    if not isinstance(usage, dict) or any(
+                            not (usage.get(k) is None or (type(usage[k]) is int and usage[k] >= 0))
+                            for k in _ESTIMATE_KEYS):
+                        continue
+                    key = message.get('id') or row.get('requestId') or (index, number)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    totals = by_model.setdefault(str(message.get('model')), dict.fromkeys(_ESTIMATE_KEYS, 0))
+                    for name in _ESTIMATE_KEYS:
+                        totals[name] += usage.get(name) or 0
+        except OSError:
+            continue
+    tokens, cost, unpriced, models = dict.fromkeys(_ESTIMATE_KEYS, 0), 0.0, [], {}
+    for model, totals in sorted(by_model.items()):
+        # Zero-usage rows (for example <synthetic> notices) cost nothing and name no model.
+        if not any(totals.values()):
+            continue
+        written, read = totals['cache_creation_input_tokens'], totals['cache_read_input_tokens']
+        model_cost = transport.claude_cost(model, {
+            'input': totals['input_tokens'] + written + read, 'cached_input': read,
+            'cache_write': written, 'output': totals['output_tokens'], 'reasoning': 0})
+        models[model] = {'tokens': totals, 'cost_usd': model_cost}
+        for name in _ESTIMATE_KEYS:
+            tokens[name] += totals[name]
+        if model_cost is None:
+            unpriced.append(model)
+        else:
+            cost += model_cost
+    return {'tokens': tokens, 'cost_usd': None if unpriced else round(cost, 4),
+            'by_model': models, 'basis': 'transcript-estimate',
+            'prices_as_of': transport.PRICES_AS_OF, 'subagent_files': len(extra),
+            'unpriced_models': unpriced}
+
+
 def _elapsed(run):
     """Run duration: until now while running, until finished_at once terminal."""
     if not run.get('started_at'):
@@ -641,10 +709,11 @@ def status(host, config_dir=None):
                'effort': session['effort'], 'cli_session_id': cli, 'state': session['status'],
                'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
-               'last_text': None, 'last_tool': None, 'last_at': None}
+               'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
         if session['family'] == 'claude-code' and cli:
-            row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(
-                claude_transcript(host.workspace, cli, config_dir, child_env))
+            transcript = claude_transcript(host.workspace, cli, config_dir, child_env)
+            row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(transcript)
+            row['estimate'] = transcript_estimate(transcript)
         rows.append(row)
     rows.sort(key=lambda r: r['started_at'] or 0, reverse=True)
     return {'schema_version': 1, 'sessions': rows}
