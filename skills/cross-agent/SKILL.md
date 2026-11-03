@@ -2,7 +2,7 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.1"
+  version: "0.0.2"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this unreleased package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
@@ -63,7 +63,10 @@ The host owns permissions, task classification, installed sources and session id
    not billing data, covers the interactive part before adoption too, and stays
    separate from the launcher's exact `usage.json` figures.
    An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes
-   its reason from the first output line.
+   its reason from the first output line. A `CONSULTATION_REQUIRED` or
+   `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps its status with
+   `handoff_invalid: true`: read the question from `output` and answer the same session.
+   Codex resume needs the provider rollout ([CLI runtime](references/cli-runtime.md)).
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.
@@ -76,6 +79,8 @@ The host owns permissions, task classification, installed sources and session id
    remains null; requested argv or assistant text never proves actual provider identity.
    `USER_INPUT_REQUIRED` stops for a user decision after required permitted consultation.
    `FAILED`, `BLOCKED`, `UNAVAILABLE`, `CANCELLED` retain partial evidence and coverage gaps.
+   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `context-transfer`.
+   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `context-transfer`.
 
 ## Security Model
 

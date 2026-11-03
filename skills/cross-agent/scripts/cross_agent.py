@@ -127,7 +127,28 @@ def _process(argv, brief, run, host, env):
             signal.signal(sig, handler)
 
 
-def _provider(family, run, requested_model=None):
+def _codex_turn_context(thread_id, env=None):
+    """Model and effort of the last turn in the child's Codex rollout for thread_id.
+
+    codex exec --json prints no model; Codex records it in turn_context events of
+    <CODEX_HOME or HOME/.codex>/sessions/YYYY/MM/DD/rollout-*-<thread_id>.jsonl."""
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
+    root = Path(env.get('CODEX_HOME') or Path(home) / '.codex') / 'sessions'
+    context = {}
+    for path in sorted(root.glob('*/*/*/rollout-*-' + thread_id + '.jsonl')):
+        for line in path.read_text('utf-8', errors='replace').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (isinstance(event, dict) and event.get('type') == 'turn_context'
+                    and isinstance(event.get('payload'), dict)):
+                context = {k: event['payload'].get(k) for k in ('model', 'effort')}
+    return context
+
+
+def _provider(family, run, requested_model=None, env=None):
     """Read only provider envelope fields, never identity in assistant content."""
     raw = (run / 'stdout.json').read_text('utf-8', errors='replace')
     observed = {}
@@ -156,6 +177,12 @@ def _provider(family, run, requested_model=None):
                     if source in event['payload']:
                         observed[dest] = event['payload'][source]
         observed['model_basis'] = 'provider' if observed.get('actual_model') is not None else None
+        if observed.get('actual_model') is None and parsed['session']:
+            context = _codex_turn_context(parsed['session'], env)
+            if context.get('model') is not None:
+                observed['actual_model'] = context['model']
+                observed['actual_effort'] = context.get('effort')
+                observed['model_basis'] = 'provider-rollout'
         answer = (run / 'review.md').read_text('utf-8') if (run / 'review.md').is_file() else ''
     else:
         payload = json.loads(raw)
@@ -262,7 +289,8 @@ def _answer(text):
         if (not isinstance(handoff, dict) or not isinstance(handoff.get('question'), str)
                 or not handoff['question'].strip()
                 or any(not isinstance(handoff.get(k), list) for k in ('options', 'evidence', 'consultants'))):
-            raise ValueError('invalid handoff')
+            # Keep the child's question resumable: the host answers from output.
+            return {'status': value['status'], 'output': value['output'], 'handoff_invalid': True}
     return {k: value[k] for k in ('status', 'output', 'handoff') if k in value}
 
 
@@ -302,7 +330,9 @@ def _brief(request, host, role, family):
     lines += [
              'Return only JSON: schema_version=1, status, output (text).',
              'Statuses: ' + ', '.join(sorted(STATUSES)) + '.',
-             'For consultation/user input include handoff: question, options, evidence, consultants.',
+             'For consultation/user input include handoff with all four fields, for example: '
+             + json.dumps({'handoff': {'question': 'Which option?', 'options': ['A', 'B'],
+                                       'evidence': [], 'consultants': []}}) + '.',
              'Stop at a required decision. Do not claim completion while work is pending.',
              'Host target snapshot:\n' + json.dumps(host.target_identity, sort_keys=True)]
     if host.skill_context is not None:
@@ -464,7 +494,7 @@ def dispatch(request, host_context):
                     raise
                 entry.setdefault('metadata_errors', []).append(str(exc))
             try:
-                text, observed, reported = _provider(agent.family, run, agent.model)
+                text, observed, reported = _provider(agent.family, run, agent.model, child_env)
                 entry['observed_identity'] = observed
                 entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
                                         round_no, adopted)

@@ -25,6 +25,11 @@
    `disabled by policy` for read-only. A trusted host may attest bounded local
    workspace actions only after checking isolation, delegation denial and fresh/resume
    behavior. Unknown combinations return `UNAVAILABLE`.
+   `codex exec --json` prints no model or effort. The launcher reads them from the last
+   `turn_context` of the child's rollout
+   (`<CODEX_HOME or HOME/.codex>/sessions/*/*/*/rollout-*-<thread_id>.jsonl`) and records
+   `model_basis: provider-rollout`. Without that file a Codex session stays
+   non-resumable and `--session`/resume returns `UNAVAILABLE`; use `--new`.
 4. `--status` estimates a Claude Code session's tokens and cost from its transcripts,
    without writing anything: the main `<projects>/<slug>/<id>.jsonl` and every
    `<id>/subagents/agent-*.jsonl`, read line by line. It sums `message.usage` of

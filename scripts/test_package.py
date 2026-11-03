@@ -12,7 +12,7 @@ class PackageTests(unittest.TestCase):
     def test_frontmatter_license_changelog_and_reference_links(self):
         skill=ROOT/'skills/cross-agent';text=(skill/'SKILL.md').read_text()
         self.assertIn('name: cross-agent',text.split('---',2)[1])
-        self.assertIn('version: "0.0.1"',text.split('---',2)[1])
+        self.assertIn('version: "0.0.2"',text.split('---',2)[1])
         self.assertEqual((ROOT/'LICENSE').read_bytes(),(skill/'LICENSE').read_bytes())
         self.assertIn('## 0.0.1',(skill/'CHANGELOG.md').read_text())
         for link in re.findall(r'\]\((references/[^)]+)\)',text):

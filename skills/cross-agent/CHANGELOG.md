@@ -6,6 +6,11 @@
    is omitted: Claude Code (Opus 5.5 default, Fable 5.1) reviews, Codex `gpt-6.1-sol`
    reviews or executes, both at `medium` effort by default. An explicit `--config`
    replaces it.
+2. Read Codex model and effort from the child's rollout `turn_context`, so a completed
+   Codex session can resume (`model_basis: provider-rollout`).
+3. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as the
+   child's status plus `handoff_invalid: true` instead of `FAILED`; the brief shows an
+   exact `handoff` JSON example.
 
 ## 0.0.1 - 2026-11-01
 

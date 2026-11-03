@@ -254,6 +254,45 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         third = dispatch(parse_request('codex --new [read]'), self.host).results[0]
         self.assertEqual(third['status'], 'COMPLETED')
 
+    def test_codex_identity_from_rollout_allows_resume(self):
+        # Real codex exec --json prints no session_meta; the rollout file names the model.
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        self.assertEqual(text.count(old), 1)
+        rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
+                   "day.mkdir(parents=True,exist_ok=True)\n"
+                   "with open(day/('rollout-2026-11-03T00-00-00-'+sid+'.jsonl'),'a') as f:\n"
+                   " f.write(json.dumps({'type':'session_meta','payload':{'id':sid}})+'\\n')\n"
+                   " f.write(json.dumps({'type':'turn_context','payload':{'model':'gpt-6.1-sol','effort':'low'}})+'\\n')")
+        fixture.write_text(text.replace(old, rollout))
+        first = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(first['status'], 'COMPLETED')
+        self.assertEqual(first['actual_model'], 'gpt-6.1-sol')
+        self.assertEqual(first['observed_identity']['model_basis'], 'provider-rollout')
+        second = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(second['status'], 'COMPLETED')
+        self.assertEqual(first['session_id'], second['session_id'])
+        self.assertEqual(first['cli_session_id'], second['cli_session_id'])
+
+    def test_invalid_handoff_keeps_child_status_for_resume(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "if 'MISMATCH' in brief:"
+        self.assertEqual(text.count(old), 1)
+        bad = ("if 'BADHANDOFF' in brief and 'Host answer' not in brief:\n"
+               " value.update(status='CONSULTATION_REQUIRED',output='Which option?',handoff={'question':'Which?'})\n")
+        fixture.write_text(text.replace(old, bad + old))
+        first = dispatch(parse_request('codex [BADHANDOFF]'), self.host).results[0]
+        self.assertEqual(first['status'], 'CONSULTATION_REQUIRED')
+        self.assertIs(first['handoff_invalid'], True)
+        self.assertEqual(first['output'], 'Which option?')
+        self.assertNotIn('handoff', first)
+        self.assertIn('"consultants": []', Path(first['artifacts']['brief']).read_text())
+        second = dispatch(parse_request('codex [BADHANDOFF]'), replace(self.host, answer={'choice': 'A'})).results[0]
+        self.assertEqual(second['status'], 'COMPLETED')
+        self.assertEqual(first['session_id'], second['session_id'])
+
     def test_adopted_per_round_session_total_is_never_complete(self):
         from cross_agent_request import resolve_agents
         from cross_agent_state import adopt_session
