@@ -15,7 +15,9 @@ from urllib.parse import urlsplit
 
 
 def slug(path):
-    return str(Path(path).resolve()).replace('/', '-')
+    resolved = str(Path(path).resolve())
+    digest = hashlib.sha256(os.fsencode(resolved)).hexdigest()[:12]
+    return (Path(resolved).name or 'root') + '-' + digest
 
 
 def normalize_remote(url):
@@ -238,7 +240,7 @@ def measure_usage(args, env, store):
         transcript = getattr(args, 'transcript', None)
         if not transcript and env.get('CLAUDE_CODE_SESSION_ID'):
             cwd = getattr(args, 'repo', None) or os.getcwd()
-            transcript = str(Path(env.get('HOME', str(Path.home()))) / '.claude/projects' / slug(cwd) / (env['CLAUDE_CODE_SESSION_ID'] + '.jsonl'))
+            transcript = str(Path(env.get('HOME', str(Path.home()))) / '.claude/projects' / str(Path(cwd).resolve()).replace('/', '-') / (env['CLAUDE_CODE_SESSION_ID'] + '.jsonl'))
         if occupied is None and transcript:
             for event in _json_lines(transcript):
                 if not isinstance(event, dict) or event.get('type') != 'assistant' or event.get('isSidechain') is True:

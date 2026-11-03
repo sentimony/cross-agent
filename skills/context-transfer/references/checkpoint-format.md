@@ -61,7 +61,9 @@ None.
 By default Git worktrees share `<git common dir>/context-transfer/`. Outside Git the store
 is under `$XDG_STATE_HOME/context-transfer/<slug>/`, or `~/.local/state/context-transfer/<slug>/`.
 `--store` overrides `CONTEXT_TRANSFER_DIR`, which overrides the default. Each checkpoint
-is `<transfer_id>.md`; `latest-<worktree slug>` points to the latest one. Optional
+is `<transfer_id>.md`; `latest-<worktree slug>` points to the latest one. A slug is
+the realpath basename (or `root` for `/`), followed by `-` and the first 12 hex digits
+of the SHA-256 digest of the filesystem-encoded realpath. Optional
 `config.json` holds thresholds and `window_tokens`; hooks use `reminders/`.
 
 Run `validate <path>` to check a completed checkpoint. Missing artifacts are warnings

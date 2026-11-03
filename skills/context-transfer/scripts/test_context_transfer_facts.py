@@ -68,6 +68,30 @@ class FactsTest(unittest.TestCase):
             external_file.write_text('changed outside')
             self.assertEqual(ct.collect_facts(repo)['project']['dirty_digests'], digests)
 
+    def test_worktree_slug_keeps_latest_pointers_separate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            first = Path(tmp) / 'a-b'
+            second = Path(tmp) / 'a' / 'b'
+            second.parent.mkdir()
+            git(repo, 'worktree', 'add', '-b', 'first', str(first))
+            git(repo, 'worktree', 'add', '-b', 'second', str(second))
+            store = repo / '.git' / 'context-transfer'
+            draft = make_draft(first)
+            common = ['--store', str(store), '--json']
+            subprocess.run([sys.executable, ct.__file__, 'write', '--repo', str(first),
+                            *common, str(draft)], capture_output=True, text=True, check=True)
+            result = subprocess.run([sys.executable, ct.__file__, 'resume-check', '--repo',
+                                     str(second), *common], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIsNone(json.loads(result.stdout)['transfer_id'])
+            self.assertEqual(json.loads(result.stdout)['verdict'], 'choose')
+            self.assertNotEqual(ct.slug(first), ct.slug(second))
+            for path in (first, second, Path('/')):
+                resolved = str(path.resolve())
+                expected = (path.resolve().name or 'root') + '-' + hashlib.sha256(os.fsencode(resolved)).hexdigest()[:12]
+                self.assertEqual(ct.slug(path), expected)
+
     def test_remote_normalization(self):
         for remote in ('git@github.com:O/R.git', 'ssh://git@github.com:22/O/R',
                        'https://github.com/O/R'):
