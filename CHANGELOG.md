@@ -43,6 +43,7 @@
 18. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as
     the child's status plus `handoff_invalid: true` instead of `FAILED`; the brief
     shows an exact `handoff` JSON example.
+19. Add the separate context-transfer skill for saving and resuming session checkpoints.
 
 ## 0.0.1 - 2026-11-01
 
