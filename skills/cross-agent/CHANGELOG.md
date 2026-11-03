@@ -3,9 +3,9 @@
 ## Unreleased
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
-   is omitted: Claude Code (Opus 5.5 default, Fable 5.1) reviews, Codex `gpt-6.1-sol`
-   reviews or executes, both at `medium` effort by default. An explicit `--config`
-   replaces it.
+   is omitted: Claude Code (Opus 5.5 default, Fable 5.1, Sonnet 5.5) reviews, Codex
+   (`gpt-6.1-sol` default, `gpt-6.1-terra`) reviews or executes, both at `medium` effort
+   by default. An explicit `--config` replaces it.
 2. Read Codex model and effort from the child's rollout `turn_context`, so a completed
    Codex session can resume (`model_basis: provider-rollout`).
 3. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as the

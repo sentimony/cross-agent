@@ -75,11 +75,12 @@ configuration incorrectly marks it supported.
 The launcher reads `config/default.json` from the installed skill when `--config` is
 omitted. It is an owner-attested default, not live probe evidence:
 
-1. `claude-code`: `claude-opus-5-5` (default) and `claude-fable-5-1`, every effort,
-   default `medium`, `read-only` and `execution`. Execution needs a host policy whose
+1. `claude-code`: `claude-opus-5-5` (default) and `claude-fable-5-1`, every effort, and
+   `claude-sonnet-5-5` with `low`, `medium`, `high`; default `medium`, `read-only` and
+   `execution`. Execution needs a host policy whose
    `local_actions` include `orchestrate` (see [CLI runtime](cli-runtime.md)).
-2. `codex`: `gpt-6.1-sol`, efforts `low`, `medium`, `high`, default `medium`,
-   `read-only` and `execution`.
+2. `codex`: `gpt-6.1-sol` (default) and `gpt-6.1-terra`, efforts `low`, `medium`,
+   `high`, default `medium`, `read-only` and `execution`.
 3. Antigravity is absent, so it stays unavailable until an explicit config adds it.
 
 An explicit `--config` replaces the default entirely; it is not layered on top. The

@@ -3,9 +3,9 @@
 ## Unreleased
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
-   is omitted: Claude Code (Opus 5.5 default, Fable 5.1) reviews, Codex `gpt-6.1-sol`
-   reviews or executes, both at `medium` effort by default. An explicit `--config`
-   replaces it.
+   is omitted: Claude Code (Opus 5.5 default, Fable 5.1, Sonnet 5.5) reviews, Codex
+   (`gpt-6.1-sol` default, `gpt-6.1-terra`) reviews or executes, both at `medium` effort
+   by default. An explicit `--config` replaces it.
 2. Add a Claude Code execution profile for delegated orchestrators: an explicit
    `orchestrate` host action, project settings loaded, workspace tools and subagents,
    no MCP or web tools. Host JSON `pass_env` keeps named variables in the child.
@@ -38,6 +38,11 @@
 16. Record the `--session-id` of a fresh Claude Code run before it starts, so
     `--status` shows its last message, tool and estimate while it runs; the ID stays a
     run field and never becomes a resumable or owning binding.
+17. Read Codex model and effort from the child's rollout `turn_context`, so a completed
+    Codex session can resume (`model_basis: provider-rollout`).
+18. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as
+    the child's status plus `handoff_invalid: true` instead of `FAILED`; the brief
+    shows an exact `handoff` JSON example.
 
 ## 0.0.1 - 2026-11-01
 
