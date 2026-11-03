@@ -111,12 +111,39 @@ def resolve_store(args):
     return store
 
 
-def collect_facts(repo):
+def capture_delegated(host_context):
+    if not host_context:
+        return {'not_captured': 'no --host-context'}
+    sibling = Path(__file__).resolve().parent / '../../cross-agent/scripts/cross_agent.py'
+    if not sibling.is_file():
+        return {'not_captured': 'cross_agent.py missing'}
+    try:
+        result = subprocess.run([sys.executable, str(sibling), '--host-context',
+                                 str(host_context), '--status'], capture_output=True,
+                                text=True, timeout=30, check=False)
+    except subprocess.TimeoutExpired:
+        return {'not_captured': 'status timeout'}
+    except OSError:
+        return {'not_captured': 'status launch failed'}
+    if result.returncode:
+        return {'not_captured': 'status exited nonzero'}
+    try:
+        sessions = json.loads(result.stdout)['sessions']
+        fields = ('session_id', 'task', 'family', 'model', 'effort',
+                  'cli_session_id', 'state', 'alive')
+        if not isinstance(sessions, list):
+            raise ValueError('sessions is not a list')
+        return [{key: session[key] for key in fields} for session in sessions]
+    except (ValueError, KeyError, TypeError):
+        return {'not_captured': 'invalid status JSON or sessions'}
+
+
+def collect_facts(repo, host_context=None):
     project = _project(repo)
     return {'project': project, 'checkpoints': [],
             'context': {'occupied_tokens': None, 'window_tokens': None, 'percent': None,
                         'basis': 'unknown', 'threshold_mode': None},
-            'delegated_sessions': {'not_captured': 'no --host-context'}}
+            'delegated_sessions': capture_delegated(host_context)}
 
 
 
@@ -404,7 +431,8 @@ def _atomic_write(path, data):
 def write_checkpoint(draft_path, args):
     text = Path(draft_path).read_text(encoding='utf-8')
     meta, body = parse_checkpoint(text)
-    project = collect_facts(args.repo)['project']
+    facts = collect_facts(args.repo, getattr(args, 'host_context', None))
+    project = facts['project']
     errors, warnings = validate_checkpoint(meta, body, project['root'], 'draft')
     errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(text)
     if errors:
@@ -423,7 +451,7 @@ def write_checkpoint(draft_path, args):
         old_model = {key: old.get(key) for key in ('task', 'verification', 'continuation', 'artifacts')}
         old_model['source'] = {'model': old.get('source', {}).get('model')}
         keys = ('branch', 'head', 'dirty', 'untracked')
-        if model == old_model and _without_resume(body) == _without_resume(old_body) and all(project[k] == old.get('project', {}).get(k) for k in keys):
+        if model == old_model and facts['delegated_sessions'] == old.get('delegated_sessions') and _without_resume(body) == _without_resume(old_body) and all(project[k] == old.get('project', {}).get(k) for k in keys):
             return old_path
     now = datetime.datetime.now(datetime.timezone.utc)
     transfer_id = now.strftime('%Y%m%dT%H%M%SZ-') + os.urandom(4).hex()
@@ -435,7 +463,7 @@ def write_checkpoint(draft_path, args):
     usage.pop('level', None)
     result = dict(model, schema_version=1, transfer_id=transfer_id,
                   created_at=now.isoformat().replace('+00:00', 'Z'), previous_transfer_id=previous,
-                  project=project, delegated_sessions={'not_captured': 'no --host-context'})
+                  project=project, delegated_sessions=facts['delegated_sessions'])
     result['source'].update(agent=agent, session_id=session, context=usage)
     final_body = _resume_body(body, path, project['root'])
     output = '---\n' + json.dumps(result, indent=2, ensure_ascii=True) + '\n---\n' + final_body
@@ -517,7 +545,7 @@ def main(argv=None):
         if args.command == 'usage':
             print(json.dumps(usage, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
             return 0
-        facts = collect_facts(args.repo)
+        facts = collect_facts(args.repo, getattr(args, 'host_context', None))
         facts['context'] = usage
         pointer = store / ('latest-' + slug(facts['project']['worktree']))
         if pointer.is_file() and not pointer.is_symlink():

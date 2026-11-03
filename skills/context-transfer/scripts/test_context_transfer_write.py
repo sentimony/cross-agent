@@ -1,5 +1,8 @@
 """Checkpoint writing and validation tests."""
 import json
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +23,54 @@ class WriteTests(unittest.TestCase):
                                     statusline=False, transcript=None, rollout=None,
                                     prepare=None, refresh=None, rotate=None)
         self.draft = make_draft(self.repo)
+
+    def test_delegated_sessions_through_fake_sibling(self):
+        scripts = Path(self.tmp.name) / 'skills/context-transfer/scripts'
+        sibling = Path(self.tmp.name) / 'skills/cross-agent/scripts'
+        scripts.mkdir(parents=True)
+        sibling.mkdir(parents=True)
+        module = scripts / 'context_transfer.py'
+        shutil.copy(ct.__file__, module)
+        fake = sibling / 'cross_agent.py'
+        host = Path(self.tmp.name) / 'host.json'
+        host.write_text('{}')
+        fields = ('session_id', 'task', 'family', 'model', 'effort',
+                  'cli_session_id', 'state', 'alive')
+        sessions = [dict(zip(fields, ('id1', 'task1', 'claude', 'model1', 'medium',
+                                      'cli1', 'running', True))),
+                    dict(zip(fields, ('id2', 'task2', 'codex', 'model2', 'high',
+                                      'cli2', 'done', False)))]
+        fake.write_text('import json, sys\nassert sys.argv[1:] == ' +
+                        repr(['--host-context', str(host), '--status']) +
+                        '\nprint(' + repr(json.dumps({'sessions': sessions})) + ')\n')
+        def invoke(*args):
+            return subprocess.run([sys.executable, str(module), *args], capture_output=True,
+                                  text=True, check=True)
+        facts = json.loads(invoke('facts', '--repo', str(self.repo), '--store', str(self.store),
+                                  '--json', '--host-context', str(host)).stdout)
+        self.assertEqual(facts['delegated_sessions'], sessions)
+        written = json.loads(invoke('write', '--repo', str(self.repo), '--store', str(self.store),
+                                    '--json', '--host-context', str(host), str(self.draft)).stdout)
+        self.assertEqual(ct.parse_checkpoint(Path(written['path']).read_text())[0]['delegated_sessions'], sessions)
+        without = json.loads(invoke('facts', '--repo', str(self.repo), '--store', str(self.store),
+                                    '--json').stdout)['delegated_sessions']
+        self.assertEqual(without, {'not_captured': 'no --host-context'})
+        reasons = []
+        for code in ('import sys; sys.exit(1)', "print('invalid json')"):
+            fake.write_text(code)
+            result = json.loads(invoke('facts', '--repo', str(self.repo), '--store', str(self.store),
+                                       '--json', '--host-context', str(host)).stdout)
+            reasons.append(result['delegated_sessions']['not_captured'])
+        self.assertEqual(len(set(reasons + [without['not_captured']])), 3)
+        fake.unlink()
+        result = json.loads(invoke('facts', '--repo', str(self.repo), '--store', str(self.store),
+                                   '--json', '--host-context', str(host)).stdout)
+        self.assertIn('not_captured', result['delegated_sessions'])
+
+    def test_delegated_timeout(self):
+        with mock.patch.object(ct.subprocess, 'run', side_effect=subprocess.TimeoutExpired('fake', 30)):
+            with mock.patch.object(ct.Path, 'is_file', return_value=True):
+                self.assertIn('timeout', ct.capture_delegated('host')['not_captured'])
 
     def test_write_idempotent_and_previous(self):
         first = ct.write_checkpoint(self.draft, self.args)
