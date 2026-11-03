@@ -116,6 +116,8 @@ class FactsTest(unittest.TestCase):
 
     def test_store_precedence_and_non_git(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Git reports the realpath; macOS TMPDIR goes through the /var symlink.
+            tmp = os.path.realpath(tmp)
             repo = make_repo(tmp)
             args = argparse.Namespace(repo=str(repo), store=None)
             with mock.patch.dict(os.environ, {'CONTEXT_TRANSFER_DIR': tmp + '/env'}, clear=True):
