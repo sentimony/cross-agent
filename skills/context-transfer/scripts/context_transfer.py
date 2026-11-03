@@ -337,10 +337,11 @@ def validate_checkpoint(meta, body, root, mode):
         project = meta.get('project')
         if isinstance(project, dict):
             for key in ('root', 'worktree'):
-                if not isinstance(project.get(key), str):
+                if not isinstance(project.get(key), str) or '\x00' in project[key]:
                     errors.append('invalid project.' + key)
             for key in ('git_common_dir', 'repository', 'branch', 'head'):
-                if project.get(key) is not None and not isinstance(project[key], str):
+                if project.get(key) is not None and (not isinstance(project[key], str) or
+                        (key == 'git_common_dir' and '\x00' in project[key])):
                     errors.append('invalid project.' + key)
             for key in ('dirty', 'untracked'):
                 value = project.get(key)

@@ -94,6 +94,25 @@ class ResumeTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(json.loads(result.stdout)['verdict'], 'invalid')
 
+    def test_nul_in_project_paths_is_invalid(self):
+        path = ct.write_checkpoint(self.draft, self.args)
+        original, body = ct.parse_checkpoint(path.read_text())
+        for key in ('root', 'worktree', 'git_common_dir'):
+            with self.subTest(key=key):
+                meta = json.loads(json.dumps(original))
+                meta['project'][key] = 'bad\x00path'
+                path.write_text('---\n' + json.dumps(meta) + '\n---\n' + body)
+                for command in ('validate', 'resume-check'):
+                    result = subprocess.run([sys.executable, ct.__file__, command, '--json',
+                                             '--repo', str(self.repo), '--store', str(self.store), str(path)],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    output = json.loads(result.stdout)
+                    if command == 'validate':
+                        self.assertIn('invalid project.' + key, output['errors'])
+                    else:
+                        self.assertEqual(output['verdict'], 'invalid')
+
     def test_selection_invalid_and_exit_codes(self):
         self.assertEqual(self.check()['verdict'], 'none')
         path = ct.write_checkpoint(self.draft, self.args)
