@@ -332,6 +332,32 @@ def validate_checkpoint(meta, body, root, mode):
             fields(source.get('context'), ('occupied_tokens', 'window_tokens', 'percent', 'basis', 'threshold_mode'), 'source.context')
         fields(meta.get('project'), ('root', 'worktree', 'git_common_dir', 'repository', 'branch',
                                      'head', 'dirty', 'untracked', 'dirty_digests'), 'project')
+        project = meta.get('project')
+        if isinstance(project, dict):
+            for key in ('root', 'worktree'):
+                if not isinstance(project.get(key), str):
+                    errors.append('invalid project.' + key)
+            for key in ('git_common_dir', 'repository', 'branch', 'head'):
+                if project.get(key) is not None and not isinstance(project[key], str):
+                    errors.append('invalid project.' + key)
+            for key in ('dirty', 'untracked'):
+                value = project.get(key)
+                if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                    errors.append('invalid project.' + key)
+            digests = project.get('dirty_digests')
+            if not isinstance(digests, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                                        for k, v in digests.items()):
+                errors.append('invalid project.dirty_digests')
+        if isinstance(source, dict) and isinstance(source.get('context'), dict):
+            context = source['context']
+            for key in ('occupied_tokens', 'window_tokens', 'percent'):
+                value = context.get(key)
+                if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool)):
+                    errors.append('invalid source.context.' + key)
+            for key in ('basis', 'threshold_mode'):
+                value = context.get(key)
+                if value is not None and not isinstance(value, str):
+                    errors.append('invalid source.context.' + key)
         delegated = meta.get('delegated_sessions')
         if isinstance(delegated, list):
             for session in delegated:
@@ -365,8 +391,9 @@ def validate_checkpoint(meta, body, root, mode):
         for path in artifacts:
             if not isinstance(path, str) or Path(path).is_absolute():
                 errors.append('invalid artifact path')
-            elif not (Path(root) / path).exists():
-                (errors if mode == 'draft' else warnings).append('missing artifact ' + path)
+            elif isinstance(root, (str, Path)) and not (Path(root) / path).exists():
+                display = '[redacted]' if _secret_errors(path) else path
+                (errors if mode == 'draft' else warnings).append('missing artifact ' + display)
     positions = []
     for section in SECTIONS:
         found = re.search(r'^## ' + re.escape(section) + r'\s*$', body, re.MULTILINE)
@@ -709,11 +736,9 @@ def main(argv=None):
             return 0
         facts = collect_facts(args.repo, getattr(args, 'host_context', None))
         facts['context'] = usage
-        pointer = store / ('latest-' + slug(facts['project']['worktree']))
-        if pointer.is_file() and not pointer.is_symlink():
-            target = pointer.read_text().strip()
-            if target and Path(target).name == target and (store / target).is_file():
-                facts['checkpoints'].append(str(store / target))
+        target = read_latest(store, facts['project']['worktree'])
+        if target:
+            facts['checkpoints'].append(str(store / (target + '.md')))
         print(json.dumps(facts, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
         return 0
     except ValidationError as exc:

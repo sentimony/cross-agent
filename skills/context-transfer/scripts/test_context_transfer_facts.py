@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 import context_transfer as ct
-from ct_fixtures import git, make_repo
+from ct_fixtures import git, make_draft, make_repo
 
 
 class FactsTest(unittest.TestCase):
@@ -33,6 +33,19 @@ class FactsTest(unittest.TestCase):
             self.assertEqual(p['untracked'], ['untracked'])
             self.assertEqual(p['dirty_digests']['tracked'], hashlib.sha256(b'changed').hexdigest())
             self.assertTrue(p['branch'])
+
+    def test_facts_reports_latest_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            store = Path(tmp) / 'store'
+            draft = make_draft(repo)
+            common = ['--repo', str(repo), '--store', str(store), '--json']
+            written = subprocess.run([sys.executable, ct.__file__, 'write', *common, str(draft)],
+                                     capture_output=True, text=True, check=True)
+            path = json.loads(written.stdout)['path']
+            facts = subprocess.run([sys.executable, ct.__file__, 'facts', *common],
+                                   capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(facts.stdout)['checkpoints'], [path])
 
     def test_untracked_links_and_nested_repository(self):
         with tempfile.TemporaryDirectory() as tmp:

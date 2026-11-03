@@ -109,6 +109,22 @@ class WriteTests(unittest.TestCase):
         self.assertTrue(any('ghp_' in e and 'exampleSecret' not in e for e in errors))
 
 
+    def test_secret_artifact_diagnostics_do_not_echo(self):
+        secret = 'ghp_EXAMPLEVALUE'
+        draft = make_draft(self.repo, artifacts=[secret])
+        command = [sys.executable, ct.__file__]
+        args = ['--repo', str(self.repo), '--store', str(self.store)]
+        write = subprocess.run(command + ['write', *args, str(draft)], capture_output=True, text=True)
+        self.assertEqual(write.returncode, 1)
+        self.assertNotIn('EXAMPLEVALUE', write.stdout + write.stderr)
+        valid = ct.write_checkpoint(make_draft(self.repo), self.args)
+        meta, body = ct.parse_checkpoint(valid.read_text())
+        meta['artifacts'] = [secret]
+        valid.write_text('---\n' + json.dumps(meta) + '\n---\n' + body)
+        validate = subprocess.run(command + ['validate', str(valid)], capture_output=True, text=True)
+        self.assertEqual(validate.returncode, 1)
+        self.assertNotIn('EXAMPLEVALUE', validate.stdout + validate.stderr)
+
     def test_each_secret_and_ordinary_words(self):
         values = ['ghp_', 'github_pat_', 'glpat-', 'sk-', 'AKIA', 'xoxa-', 'xoxb-',
                   'xoxp-', 'xoxr-', 'xoxs-']

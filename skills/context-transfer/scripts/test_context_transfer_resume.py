@@ -71,6 +71,29 @@ class ResumeTests(unittest.TestCase):
         git(other, 'remote', 'add', 'origin', 'https://github.com/O/R')
         self.assertNotEqual(self.check(str(path))['verdict'], 'blocked')
 
+    def test_malformed_checkpoint_types_return_invalid(self):
+        path = ct.write_checkpoint(self.draft, self.args)
+        original, body = ct.parse_checkpoint(path.read_text())
+        cases = [('project', key, value) for key, value in (
+            ('root', 1), ('worktree', []), ('git_common_dir', []),
+            ('repository', []), ('branch', 1), ('head', []), ('dirty', None),
+            ('dirty', [1]), ('untracked', [1]), ('dirty_digests', []),
+            ('dirty_digests', {'file': 1}))]
+        cases += [('context', key, value) for key, value in (
+            ('occupied_tokens', []), ('window_tokens', {}), ('percent', 'bad'),
+            ('basis', []), ('threshold_mode', []))]
+        for group, key, value in cases:
+            with self.subTest(group=group, key=key, value=value):
+                meta = json.loads(json.dumps(original))
+                target = meta['project'] if group == 'project' else meta['source']['context']
+                target[key] = value
+                path.write_text('---\n' + json.dumps(meta) + '\n---\n' + body)
+                result = subprocess.run([sys.executable, ct.__file__, 'resume-check', '--json',
+                                         '--repo', str(self.repo), '--store', str(self.store), str(path)],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['verdict'], 'invalid')
+
     def test_selection_invalid_and_exit_codes(self):
         self.assertEqual(self.check()['verdict'], 'none')
         path = ct.write_checkpoint(self.draft, self.args)
