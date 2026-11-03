@@ -44,6 +44,10 @@
     the child's status plus `handoff_invalid: true` instead of `FAILED`; the brief
     shows an exact `handoff` JSON example.
 19. Add the separate context-transfer skill for saving and resuming session checkpoints.
+20. Accept a child result wrapped in one fenced code block (with or without a `json` tag,
+    prose around the block is discarded) and report an unparseable result as `child result
+    is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
+    `20261103-2343`).
 
 ## 0.0.1 - 2026-11-01
 

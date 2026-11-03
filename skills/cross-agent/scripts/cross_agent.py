@@ -275,8 +275,25 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no, ado
     return usage
 
 
+FENCE = re.compile(r'```[ \t]*(?:json)?[ \t]*\n(.*?)\n?```', re.DOTALL | re.IGNORECASE)
+
+
+def _loads_result(text):
+    """Parse raw JSON first; fall back to the JSON inside a single fenced block."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        blocks = FENCE.findall(text.strip())
+        if len(blocks) != 1:
+            raise
+        return json.loads(blocks[0].strip())
+
+
 def _answer(text):
-    value = json.loads(text)
+    try:
+        value = _loads_result(text)
+    except ValueError:
+        raise ValueError('child result is not JSON v1: ' + text.strip()[:80]) from None
     if (not isinstance(value, dict) or type(value.get('schema_version')) is not int
             or value.get('schema_version') != 1 or value.get('status') not in STATUSES):
         raise ValueError('invalid child result v1')
@@ -328,7 +345,8 @@ def _brief(request, host, role, family):
                      'empty); put your recommendation first in options. BLOCKED is only for a '
                      'blocker no answer can lift; start its output with "Blocker: <one line>".')
     lines += [
-             'Return only JSON: schema_version=1, status, output (text).',
+             'Return only raw JSON, no code fence, no text before or after: '
+             'schema_version=1, status, output (text).',
              'Statuses: ' + ', '.join(sorted(STATUSES)) + '.',
              'For consultation/user input include handoff with all four fields, for example: '
              + json.dumps({'handoff': {'question': 'Which option?', 'options': ['A', 'B'],

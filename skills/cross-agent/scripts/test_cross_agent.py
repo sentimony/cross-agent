@@ -293,6 +293,49 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         self.assertEqual(second['status'], 'COMPLETED')
         self.assertEqual(first['session_id'], second['session_id'])
 
+    def test_fenced_child_result_is_unwrapped(self):
+        from cross_agent import _answer
+        raw = '{"schema_version": 1, "status": "COMPLETED", "output": "done"}'
+        expected = {'status': 'COMPLETED', 'output': 'done'}
+        self.assertEqual(_answer('```json\n' + raw + '\n```\n'), expected)
+        self.assertEqual(_answer('  ```\n' + raw + '\n```  '), expected)
+        self.assertEqual(_answer('Here is the result:\n```json\n' + raw + '\n```'), expected)
+        self.assertEqual(_answer(raw), expected)
+        # Raw pretty-printed JSON whose output holds a fence parses as is.
+        nested = {'schema_version': 1, 'status': 'COMPLETED', 'output': 'see\n```json\n{}\n```'}
+        self.assertEqual(_answer(json.dumps(nested, indent=2)),
+                         {'status': 'COMPLETED', 'output': nested['output']})
+
+    def test_unusable_child_result_names_the_reason(self):
+        from cross_agent import _answer
+        raw = '{"schema_version": 1, "status": "COMPLETED", "output": "done"}'
+        with self.assertRaises(ValueError) as two:
+            _answer('```json\n' + raw + '\n```\n```json\n' + raw + '\n```')
+        self.assertTrue(str(two.exception).startswith('child result is not JSON v1: '))
+        with self.assertRaises(ValueError) as other:
+            _answer('```json\n{"hello": 1}\n```')
+        self.assertEqual(str(other.exception), 'invalid child result v1')
+
+    def test_non_json_child_result_fails_with_clear_reason(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "Path(args[args.index('-o')+1]).write_text(json.dumps(value))"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "Path(args[args.index('-o')+1]).write_text('All done, no JSON here')"))
+        result = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(result['status'], 'FAILED')
+        self.assertEqual(result['reason'], 'child result is not JSON v1: All done, no JSON here')
+
+    def test_fenced_child_result_completes_end_to_end(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "Path(args[args.index('-o')+1]).write_text(json.dumps(value))"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "Path(args[args.index('-o')+1]).write_text('Result:\\n```json\\n'+json.dumps(value)+'\\n```')"))
+        result = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(result['status'], 'COMPLETED')
+        self.assertEqual(result['output'], 'done')
+
     def test_adopted_per_round_session_total_is_never_complete(self):
         from cross_agent_request import resolve_agents
         from cross_agent_state import adopt_session
