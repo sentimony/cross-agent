@@ -582,6 +582,63 @@ def resume_check(target, args):
     return result
 
 
+def _linked_ids(store):
+    linked = set()
+    for pointer in Path(store).glob('latest-*'):
+        if pointer.is_symlink() or not pointer.is_file():
+            continue
+        value = pointer.read_text(encoding='utf-8').strip()
+        if re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', value):
+            linked.add(value)
+    return linked
+
+
+def list_checkpoints(store):
+    store = Path(store)
+    linked = _linked_ids(store)
+    entries = []
+    for path in sorted(store.glob('*.md')):
+        if path.is_symlink() or not path.is_file():
+            continue
+        entry = {'id': path.stem, 'created_at': None, 'worktree': None,
+                 'branch': None, 'head': None, 'validation': None,
+                 'unlinked': path.stem not in linked}
+        try:
+            raw = path.read_text(encoding='utf-8')
+            meta, body = parse_checkpoint(raw)
+            project = meta.get('project')
+            project = project if isinstance(project, dict) else {}
+            entry.update(created_at=meta.get('created_at'), worktree=project.get('worktree'),
+                         branch=project.get('branch'), head=project.get('head'))
+            errors, _ = validate_checkpoint(meta, body, project.get('root') or os.getcwd(), 'checkpoint')
+            errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(raw)
+            entry['validation'] = errors[0] if errors else 'ok'
+        except (ValidationError, UnicodeError) as exc:
+            entry['validation'] = str(exc)
+        entries.append(entry)
+    return entries
+
+
+def prune(store, keep, all_worktrees, worktree):
+    if keep < 1:
+        raise ValueError('--keep must be at least 1')
+    store = Path(store)
+    groups = {}
+    for entry in list_checkpoints(store):
+        tree = entry['worktree']
+        if isinstance(tree, str) and (all_worktrees or tree == worktree):
+            groups.setdefault(tree, []).append(entry)
+    removed = []
+    for entries in groups.values():
+        entries.sort(key=lambda entry: entry['id'], reverse=True)
+        for entry in entries[keep:]:
+            if entry['unlinked']:
+                path = store / (entry['id'] + '.md')
+                path.unlink()
+                removed.append(path)
+    return removed
+
+
 def _common(parser):
     parser.add_argument('--repo', default=argparse.SUPPRESS)
     parser.add_argument('--store', default=argparse.SUPPRESS)
@@ -610,10 +667,19 @@ def main(argv=None):
             sub.add_argument('--keep', type=int, required=True)
             sub.add_argument('--all', action='store_true')
     args = parser.parse_args(argv)
-    if args.command not in ('facts', 'usage', 'write', 'validate', 'resume-check'):
-        parser.error(args.command + ' is not implemented yet')
     try:
         args.repo = getattr(args, 'repo', None)
+        if args.command in ('list', 'prune'):
+            if args.command == 'prune' and args.keep < 1:
+                parser.error('--keep must be at least 1')
+            store = resolve_store(args)
+            if args.command == 'list':
+                result = {'checkpoints': list_checkpoints(store)}
+            else:
+                tree = _project(args.repo)['worktree']
+                result = {'removed': [str(path) for path in prune(store, args.keep, args.all, tree)]}
+            print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
+            return 0
         if args.command == 'resume-check':
             result = resume_check(args.path, args)
             print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
