@@ -47,6 +47,21 @@ def _text(value):
     return os.fsdecode(value).rstrip('\n') if value is not None else None
 
 
+def _path_digest(path):
+    try:
+        if path.is_symlink():
+            return hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+        if path.is_dir():
+            return 'directory'
+        digest = hashlib.sha256()
+        with path.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except FileNotFoundError:
+        return 'deleted'
+
+
 def _project(repo):
     requested = Path(repo or os.getcwd()).resolve()
     root = _text(_git(requested, 'rev-parse', '--show-toplevel'))
@@ -81,14 +96,7 @@ def _project(repo):
     digests = {}
     for name in sorted(dirty | untracked):
         path = Path(root) / name
-        try:
-            digest = hashlib.sha256()
-            with path.open('rb') as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                    digest.update(chunk)
-            digests[name] = digest.hexdigest()
-        except FileNotFoundError:
-            digests[name] = 'deleted'
+        digests[name] = _path_digest(path)
     return {'root': root, 'worktree': root, 'git_common_dir': str(Path(common).resolve()),
             'repository': normalize_remote(remote), 'branch': branch, 'head': head,
             'dirty': sorted(dirty), 'untracked': sorted(untracked), 'dirty_digests': digests}
@@ -566,14 +574,7 @@ def resume_check(target, args):
     content = {name for name in changed if name not in digests}
     for name, saved in digests.items():
         path_now = Path(current['root']) / name
-        try:
-            digest = hashlib.sha256()
-            with path_now.open('rb') as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                    digest.update(chunk)
-            value = digest.hexdigest()
-        except FileNotFoundError:
-            value = 'deleted'
+        value = _path_digest(path_now)
         if value != saved:
             content.add(name)
     drift.extend({'kind': 'content', 'detail': name} for name in sorted(content))

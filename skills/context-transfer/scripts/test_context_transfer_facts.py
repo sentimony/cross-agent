@@ -34,6 +34,27 @@ class FactsTest(unittest.TestCase):
             self.assertEqual(p['dirty_digests']['tracked'], hashlib.sha256(b'changed').hexdigest())
             self.assertTrue(p['branch'])
 
+    def test_untracked_links_and_nested_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            outside = Path(tmp) / 'outside'
+            outside.mkdir()
+            external_file = outside / 'secret'
+            external_file.write_text('external content')
+            (repo / 'dir-link').symlink_to(outside, target_is_directory=True)
+            (repo / 'file-link').symlink_to(external_file)
+            nested = repo / 'nested'
+            nested.mkdir()
+            git(nested, 'init')
+            (nested / 'inner').write_text('nested content')
+            project = ct.collect_facts(repo)['project']
+            digests = project['dirty_digests']
+            for name, target in (('dir-link', outside), ('file-link', external_file)):
+                self.assertEqual(digests[name], hashlib.sha256(os.fsencode(str(target))).hexdigest())
+            self.assertEqual(digests['nested/'], 'directory')
+            external_file.write_text('changed outside')
+            self.assertEqual(ct.collect_facts(repo)['project']['dirty_digests'], digests)
+
     def test_remote_normalization(self):
         for remote in ('git@github.com:O/R.git', 'ssh://git@github.com:22/O/R',
                        'https://github.com/O/R'):
