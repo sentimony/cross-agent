@@ -17,7 +17,14 @@ from urllib.parse import urlsplit
 def slug(path):
     resolved = str(Path(path).resolve())
     digest = hashlib.sha256(os.fsencode(resolved)).hexdigest()[:12]
-    return (Path(resolved).name or 'root') + '-' + digest
+    # Keep latest-<slug> under the 255-byte filename limit; cut on a character boundary.
+    name, size = '', 0
+    for char in Path(resolved).name or 'root':
+        size += len(os.fsencode(char))
+        if size > 64:
+            break
+        name += char
+    return name + '-' + digest
 
 
 def normalize_remote(url):

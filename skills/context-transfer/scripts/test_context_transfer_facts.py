@@ -92,6 +92,22 @@ class FactsTest(unittest.TestCase):
                 expected = (path.resolve().name or 'root') + '-' + hashlib.sha256(os.fsencode(resolved)).hexdigest()[:12]
                 self.assertEqual(ct.slug(path), expected)
 
+    def test_long_worktree_basename_is_bounded_in_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # 239 bytes: an unbounded latest-<slug> would exceed the 255-byte name limit.
+            name = 'a' + 'я' * 119
+            repo = make_repo(tmp)
+            worktree = Path(tmp) / name
+            git(repo, 'worktree', 'add', '-b', 'long', str(worktree))
+            resolved = str(worktree.resolve())
+            digest = hashlib.sha256(os.fsencode(resolved)).hexdigest()[:12]
+            self.assertEqual(ct.slug(worktree), 'a' + 'я' * 31 + '-' + digest)
+            store = repo / '.git' / 'context-transfer'
+            subprocess.run([sys.executable, ct.__file__, 'write', '--repo', str(worktree),
+                            '--store', str(store), '--json', str(make_draft(worktree))],
+                           capture_output=True, text=True, check=True)
+            self.assertTrue((store / ('latest-' + ct.slug(worktree))).is_file())
+
     def test_remote_normalization(self):
         for remote in ('git@github.com:O/R.git', 'ssh://git@github.com:22/O/R',
                        'https://github.com/O/R'):
