@@ -114,6 +114,114 @@ def collect_facts(repo):
             'delegated_sessions': {'not_captured': 'no --host-context'}}
 
 
+
+def _json_lines(path):
+    try:
+        with Path(path).open(encoding='utf-8') as stream:
+            for line in stream:
+                try:
+                    yield json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue
+    except (OSError, UnicodeError):
+        return
+
+
+def _input_sum(usage):
+    return sum(usage.get(key, 0) or 0 for key in
+               ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'))
+
+
+def resolve_thresholds(args, config, window):
+    defaults = ('50%', '62%', '75%')
+    absolute = (100000, 125000, 150000)
+    thresholds = []
+    used_absolute = False
+    for index, name in enumerate(('prepare', 'refresh', 'rotate')):
+        value = getattr(args, name, None)
+        if value is None:
+            value = config.get(name, defaults[index])
+        value = str(value)
+        if re.fullmatch(r'[0-9]+(?:\.[0-9]+)?%', value):
+            if window is None:
+                threshold = absolute[index]
+                used_absolute = True
+            else:
+                threshold = window * float(value[:-1]) / 100
+        elif re.fullmatch(r'[0-9]+', value):
+            threshold = int(value)
+            used_absolute = True
+        else:
+            raise ValueError('invalid threshold: ' + name)
+        thresholds.append(threshold)
+    if not thresholds[0] < thresholds[1] < thresholds[2]:
+        raise ValueError('thresholds must strictly increase')
+    return tuple(thresholds), 'absolute' if used_absolute else 'percentage'
+
+
+def measure_usage(args, env, store):
+    config_path = Path(store) / 'config.json'
+    try:
+        config = json.loads(config_path.read_text()) if config_path.exists() else {}
+        if not isinstance(config, dict):
+            raise ValueError('config must be an object')
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError('invalid config: ' + str(exc))
+    occupied, window, basis = None, None, 'unknown'
+    if getattr(args, 'statusline', False):
+        try:
+            data = json.load(sys.stdin).get('context_window', {})
+            window = data.get('context_window_size')
+            basis = 'statusline'
+            if data.get('used_percentage') is not None:
+                if isinstance(data.get('current_usage'), dict):
+                    occupied = _input_sum(data['current_usage'])
+                elif window is not None:
+                    occupied = round(data['used_percentage'] * window / 100)
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError('invalid statusline JSON')
+    else:
+        rollout = getattr(args, 'rollout', None)
+        if not rollout and env.get('CODEX_THREAD_ID'):
+            matches = sorted((Path(env.get('HOME', str(Path.home()))) / '.codex/sessions').rglob('*' + env['CODEX_THREAD_ID'] + '*.jsonl'))
+            rollout = str(matches[-1]) if matches else None
+        if rollout:
+            for event in _json_lines(rollout):
+                if not isinstance(event, dict):
+                    continue
+                payload = event.get('payload', {})
+                if isinstance(payload, dict) and payload.get('type') == 'token_count':
+                    info = payload.get('info') or {}
+                    last = info.get('last_token_usage') or {}
+                    if 'input_tokens' in last:
+                        occupied, window, basis = last['input_tokens'], info.get('model_context_window'), 'codex-rollout'
+        transcript = getattr(args, 'transcript', None)
+        if not transcript and env.get('CLAUDE_CODE_SESSION_ID'):
+            cwd = getattr(args, 'repo', None) or os.getcwd()
+            transcript = str(Path(env.get('HOME', str(Path.home()))) / '.claude/projects' / slug(cwd) / (env['CLAUDE_CODE_SESSION_ID'] + '.jsonl'))
+        if occupied is None and transcript:
+            for event in _json_lines(transcript):
+                if not isinstance(event, dict) or event.get('type') != 'assistant' or event.get('isSidechain') is True:
+                    continue
+                message = event.get('message') or {}
+                usage = message.get('usage') if isinstance(message, dict) else None
+                if isinstance(usage, dict):
+                    occupied, window, basis = _input_sum(usage), None, 'transcript-estimate'
+    if config.get('window_tokens') is not None:
+        window = config['window_tokens']
+    if window is not None and (not isinstance(window, (int, float)) or isinstance(window, bool) or window <= 0):
+        raise ValueError('window_tokens must be positive')
+    thresholds, mode = resolve_thresholds(args, config, window)
+    level = 'unknown' if occupied is None else 'ok'
+    if occupied is not None:
+        for name, threshold in zip(('prepare', 'refresh', 'rotate'), thresholds):
+            if occupied >= threshold:
+                level = name
+    return {'level': level, 'occupied_tokens': occupied, 'window_tokens': window,
+            'percent': occupied * 100 / window if occupied is not None and window else None,
+            'basis': basis, 'threshold_mode': mode}
+
+
 def _common(parser):
     parser.add_argument('--repo', default=argparse.SUPPRESS)
     parser.add_argument('--store', default=argparse.SUPPRESS)
@@ -142,12 +250,17 @@ def main(argv=None):
             sub.add_argument('--keep', type=int, required=True)
             sub.add_argument('--all', action='store_true')
     args = parser.parse_args(argv)
-    if args.command != 'facts':
+    if args.command not in ('facts', 'usage'):
         parser.error(args.command + ' is not implemented yet')
     try:
         args.repo = getattr(args, 'repo', None)
         store = resolve_store(args)
+        usage = measure_usage(args, os.environ, store)
+        if args.command == 'usage':
+            print(json.dumps(usage, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
+            return 0
         facts = collect_facts(args.repo)
+        facts['context'] = usage
         pointer = store / ('latest-' + slug(facts['project']['worktree']))
         if pointer.is_file() and not pointer.is_symlink():
             target = pointer.read_text().strip()
@@ -155,6 +268,8 @@ def main(argv=None):
                 facts['checkpoints'].append(str(store / target))
         print(json.dumps(facts, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
         return 0
+    except ValueError as exc:
+        parser.error(str(exc))
     except OSError as exc:
         print('I/O error: ' + str(exc), file=sys.stderr)
         return 3
