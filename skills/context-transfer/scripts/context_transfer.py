@@ -1,5 +1,8 @@
 """Collect local context and manage context-transfer checkpoints."""
 import argparse
+import datetime
+import shlex
+import tempfile
 import hashlib
 import json
 import os
@@ -101,6 +104,8 @@ def resolve_store(args):
     else:
         state = os.environ.get('XDG_STATE_HOME') or str(Path.home() / '.local/state')
         store = Path(state) / 'context-transfer' / slug(project['root'])
+    if store.is_symlink():
+        raise OSError('store is a symlink')
     store.mkdir(mode=0o700, parents=True, exist_ok=True)
     store.chmod(0o700)
     return store
@@ -222,6 +227,242 @@ def measure_usage(args, env, store):
             'basis': basis, 'threshold_mode': mode}
 
 
+
+SECTIONS = ('Resume prompt', 'Objective and acceptance', 'Authority and prohibitions',
+            'State', 'Decisions', 'Running now', 'Pending user decisions',
+            'Failed approaches', 'Verification', 'Next actions', 'Missing information')
+RESUME_MARKER = '<!-- context-transfer:resume-check -->'
+SECRET_PATTERNS = [(name, re.compile(pattern, re.IGNORECASE)) for name, pattern in (
+    ('ghp_', r'ghp_[A-Za-z0-9_]+'), ('github_pat_', r'github_pat_[A-Za-z0-9_]+'),
+    ('glpat-', r'glpat-[A-Za-z0-9_-]+'), ('sk-', r'(?<![A-Za-z])sk-[A-Za-z0-9_-]+'),
+    ('AKIA', r'AKIA[A-Z0-9]+'),
+    ('xoxa-', r'xoxa-[A-Za-z0-9-]+'), ('xoxb-', r'xoxb-[A-Za-z0-9-]+'),
+    ('xoxp-', r'xoxp-[A-Za-z0-9-]+'), ('xoxr-', r'xoxr-[A-Za-z0-9-]+'),
+    ('xoxs-', r'xoxs-[A-Za-z0-9-]+'),
+    ('private key', r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----'),
+    ('password', r'\bpassword["\']?\s*[:=]\s*["\']?[^\s"\',}]+'),
+    ('token', r'\btoken["\']?\s*[:=]\s*["\']?[^\s"\',}]+'),
+)]
+
+
+class ValidationError(Exception):
+    pass
+
+
+def parse_checkpoint(text):
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != '---':
+        raise ValidationError('missing front matter opening delimiter')
+    end = next ( (i for i in range(1, len(lines)) if lines[i].strip() == '---'), None)
+    if end is None:
+        raise ValidationError('missing front matter closing delimiter')
+    try:
+        meta = json.loads(''.join(lines[1:end]))
+    except ValueError:
+        raise ValidationError('invalid front matter JSON')
+    if not isinstance(meta, dict):
+        raise ValidationError('front matter must be an object')
+    return meta, ''.join(lines[end + 1:])
+
+
+def validate_checkpoint(meta, body, root, mode):
+    errors, warnings = [], []
+    def fields(obj, keys, label):
+        if not isinstance(obj, dict):
+            errors.append(label + ' must be an object')
+            return
+        for key in keys:
+            if key not in obj:
+                errors.append('missing field ' + label + '.' + key)
+    model_keys = {'task', 'verification', 'continuation', 'artifacts', 'source'}
+    if mode == 'draft':
+        for key in meta.keys() - model_keys:
+            errors.append('script-owned field ' + key)
+        if 'source' in meta:
+            if not isinstance(meta['source'], dict):
+                errors.append('source must be an object')
+            else:
+                errors.extend('script-owned field source.' + key for key in meta['source'] if key != 'model')
+    else:
+        fields(meta, ('schema_version', 'transfer_id', 'created_at', 'previous_transfer_id',
+                      'source', 'project', 'delegated_sessions'), 'checkpoint')
+        version = meta.get('schema_version')
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            errors.append('invalid schema_version')
+        elif version > 1:
+            errors.append('unsupported schema_version; update the skill')
+        source = meta.get('source')
+        fields(source, ('agent', 'session_id', 'model', 'context'), 'source')
+        if isinstance(source, dict):
+            fields(source.get('context'), ('occupied_tokens', 'window_tokens', 'percent', 'basis', 'threshold_mode'), 'source.context')
+        fields(meta.get('project'), ('root', 'worktree', 'git_common_dir', 'repository', 'branch',
+                                     'head', 'dirty', 'untracked', 'dirty_digests'), 'project')
+        delegated = meta.get('delegated_sessions')
+        if isinstance(delegated, list):
+            for session in delegated:
+                fields(session, ('session_id', 'task', 'family', 'model', 'effort', 'cli_session_id', 'state', 'alive'), 'delegated_sessions')
+        elif not isinstance(delegated, dict) or not isinstance(delegated.get('not_captured'), str):
+            errors.append('invalid delegated_sessions')
+    fields(meta, ('task', 'verification', 'continuation', 'artifacts'), 'model')
+    task, verification, continuation = meta.get('task'), meta.get('verification'), meta.get('continuation')
+    fields(task, ('objective', 'status', 'next_action'), 'task')
+    fields(verification, ('status', 'evidence'), 'verification')
+    fields(continuation, ('recommended_skills', 'blockers', 'pending_decisions'), 'continuation')
+    if isinstance(task, dict) and task.get('status') not in ('in-progress', 'blocked', 'awaiting-user', 'done'):
+        errors.append('invalid task.status')
+    if isinstance(verification, dict):
+        if verification.get('status') not in ('verified', 'partial', 'unverified'):
+            errors.append('invalid verification.status')
+        evidence = verification.get('evidence')
+        if not isinstance(evidence, list):
+            errors.append('invalid verification.evidence')
+        else:
+            for item in evidence:
+                fields(item, ('claim', 'check', 'result'), 'verification.evidence')
+    if isinstance(continuation, dict):
+        for key in ('recommended_skills', 'blockers', 'pending_decisions'):
+            if not isinstance(continuation.get(key), list):
+                errors.append('invalid continuation.' + key)
+    artifacts = meta.get('artifacts')
+    if not isinstance(artifacts, list):
+        errors.append('invalid artifacts')
+    else:
+        for path in artifacts:
+            if not isinstance(path, str) or Path(path).is_absolute():
+                errors.append('invalid artifact path')
+            elif not (Path(root) / path).exists():
+                (errors if mode == 'draft' else warnings).append('missing artifact ' + path)
+    positions = []
+    for section in SECTIONS:
+        found = re.search(r'^## ' + re.escape(section) + r'\s*$', body, re.MULTILINE)
+        if not found:
+            errors.append('missing section ' + section)
+        else:
+            positions.append(found.start())
+    if positions != sorted(positions):
+        errors.append('sections out of order')
+    errors.extend(_secret_errors('---\n' + json.dumps(meta, indent=2) + '\n---\n' + body))
+    return errors, warnings
+
+
+def _secret_errors(text):
+    errors = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for name, pattern in SECRET_PATTERNS:
+            if pattern.search(line):
+                errors.append('line ' + str(number) + ': secret pattern ' + name)
+    return errors
+
+
+def read_latest(store, worktree):
+    pointer = Path(store) / ('latest-' + slug(worktree))
+    if pointer.is_symlink():
+        raise OSError('latest pointer is a symlink')
+    try:
+        value = pointer.read_text().strip()
+    except FileNotFoundError:
+        return None
+    if not re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', value):
+        raise OSError('invalid latest pointer')
+    path = Path(store) / (value + '.md')
+    if path.is_symlink() or not path.is_file():
+        raise OSError('invalid latest checkpoint')
+    return value
+
+
+def _without_resume(body):
+    pattern = re.escape(RESUME_MARKER) + r'.*?' + re.escape(RESUME_MARKER) + r'\n?'
+    return re.sub(pattern, '', body, flags=re.DOTALL)
+
+
+def _resume_body(body, path, root):
+    body = _without_resume(body)
+    heading = re.search(r'^## Resume prompt\s*$', body, re.MULTILINE)
+    next_heading = re.search(r'^## ', body[heading.end():], re.MULTILINE)
+    end = heading.end() + next_heading.start() if next_heading else len(body)
+    quoted = shlex.quote(str(root))
+    block = (RESUME_MARKER + '\nCheckpoint: ' + str(path.resolve()) + '\n'
+             + '```sh\n' + '\n'.join('git -C ' + quoted + ' ' + command for command in
+                ('branch --show-current', 'rev-parse HEAD', 'status --porcelain'))
+             + '\n```\n' + RESUME_MARKER + '\n')
+    return body[:end] + block + body[end:]
+
+
+def _atomic_write(path, data):
+    fd, temp = tempfile.mkstemp(prefix='.context-transfer-', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def write_checkpoint(draft_path, args):
+    text = Path(draft_path).read_text(encoding='utf-8')
+    meta, body = parse_checkpoint(text)
+    project = collect_facts(args.repo)['project']
+    errors, warnings = validate_checkpoint(meta, body, project['root'], 'draft')
+    errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(text)
+    if errors:
+        raise ValidationError('; '.join(errors))
+    if len(body) > args.budget:
+        warnings.append('body exceeds budget')
+    for warning in warnings:
+        print('Warning: ' + warning, file=sys.stderr)
+    store = resolve_store(args)
+    previous = read_latest(store, project['worktree'])
+    model = {key: meta.get(key) for key in ('task', 'verification', 'continuation', 'artifacts')}
+    model['source'] = {'model': meta.get('source', {}).get('model')}
+    if previous:
+        old_path = store / (previous + '.md')
+        old, old_body = parse_checkpoint(old_path.read_text(encoding='utf-8'))
+        old_model = {key: old.get(key) for key in ('task', 'verification', 'continuation', 'artifacts')}
+        old_model['source'] = {'model': old.get('source', {}).get('model')}
+        keys = ('branch', 'head', 'dirty', 'untracked')
+        if model == old_model and _without_resume(body) == _without_resume(old_body) and all(project[k] == old.get('project', {}).get(k) for k in keys):
+            return old_path
+    now = datetime.datetime.now(datetime.timezone.utc)
+    transfer_id = now.strftime('%Y%m%dT%H%M%SZ-') + os.urandom(4).hex()
+    path = store / (transfer_id + '.md')
+    env = os.environ
+    session = env.get('CLAUDE_CODE_SESSION_ID') or env.get('CODEX_THREAD_ID')
+    agent = 'claude-code' if env.get('CLAUDE_CODE_SESSION_ID') else 'codex' if env.get('CODEX_THREAD_ID') else 'other'
+    usage = measure_usage(args, env, store)
+    usage.pop('level', None)
+    result = dict(model, schema_version=1, transfer_id=transfer_id,
+                  created_at=now.isoformat().replace('+00:00', 'Z'), previous_transfer_id=previous,
+                  project=project, delegated_sessions={'not_captured': 'no --host-context'})
+    result['source'].update(agent=agent, session_id=session, context=usage)
+    final_body = _resume_body(body, path, project['root'])
+    output = '---\n' + json.dumps(result, indent=2, ensure_ascii=True) + '\n---\n' + final_body
+    errors, _ = validate_checkpoint(result, final_body, project['root'], 'checkpoint')
+    errors += _secret_errors(output)
+    if errors:
+        raise ValidationError('; '.join(errors))
+    installed = False
+    try:
+        _atomic_write(path, output.encode('utf-8'))
+        installed = True
+        reread = path.read_text(encoding='utf-8')
+        reread_meta, reread_body = parse_checkpoint(reread)
+        errors, _ = validate_checkpoint(reread_meta, reread_body, project['root'], 'checkpoint')
+        if reread != output or errors or _secret_errors(reread):
+            raise OSError('checkpoint readback failed')
+        _atomic_write(store / ('latest-' + slug(project['worktree'])), (transfer_id + '\n').encode())
+    except Exception as exc:
+        if installed:
+            try:
+                path.unlink()
+            except OSError as cleanup:
+                raise OSError('write failed: ' + str(exc) + '; cleanup failed for ' + str(path) + ': ' + str(cleanup)) from exc
+        raise
+    return path
+
+
 def _common(parser):
     parser.add_argument('--repo', default=argparse.SUPPRESS)
     parser.add_argument('--store', default=argparse.SUPPRESS)
@@ -250,10 +491,27 @@ def main(argv=None):
             sub.add_argument('--keep', type=int, required=True)
             sub.add_argument('--all', action='store_true')
     args = parser.parse_args(argv)
-    if args.command not in ('facts', 'usage'):
+    if args.command not in ('facts', 'usage', 'write', 'validate'):
         parser.error(args.command + ' is not implemented yet')
     try:
         args.repo = getattr(args, 'repo', None)
+        if args.command == 'write':
+            path = write_checkpoint(args.path, args)
+            _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
+            resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
+            print(json.dumps({'path': str(path), 'resume_prompt': resume}) if getattr(args, 'json', False) else str(path) + '\n' + resume)
+            return 0
+        if args.command == 'validate':
+            raw = Path(args.path).read_text(encoding='utf-8')
+            meta, body = parse_checkpoint(raw)
+            root = meta.get('project', {}).get('root', args.repo or os.getcwd()) if isinstance(meta.get('project'), dict) else (args.repo or os.getcwd())
+            errors, warnings = validate_checkpoint(meta, body, root, 'checkpoint')
+            errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(raw)
+            if len(body) > args.budget:
+                warnings.append('body exceeds budget')
+            result = {'errors': errors, 'warnings': warnings}
+            print(json.dumps(result) if getattr(args, 'json', False) else '\n'.join(errors + ['Warning: ' + w for w in warnings]) or 'valid')
+            return 1 if errors else 0
         store = resolve_store(args)
         usage = measure_usage(args, os.environ, store)
         if args.command == 'usage':
@@ -268,6 +526,9 @@ def main(argv=None):
                 facts['checkpoints'].append(str(store / target))
         print(json.dumps(facts, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
         return 0
+    except ValidationError as exc:
+        print(json.dumps({'errors': [str(exc)]}) if getattr(args, 'json', False) else str(exc), file=sys.stdout if getattr(args, 'json', False) else sys.stderr)
+        return 1
     except ValueError as exc:
         parser.error(str(exc))
     except OSError as exc:

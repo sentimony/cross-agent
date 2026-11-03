@@ -23,3 +23,19 @@ def make_repo(tmp, remote=None):
     if remote:
         git(repo, 'remote', 'add', 'origin', remote)
     return repo
+
+
+def make_draft(root, **overrides):
+    import json
+    meta = {'task': {'objective': 'Complete task', 'status': 'in-progress', 'next_action': 'next step'},
+            'verification': {'status': 'unverified', 'evidence': []},
+            'continuation': {'recommended_skills': [], 'blockers': [], 'pending_decisions': []},
+            'artifacts': []}
+    meta.update(overrides)
+    sections = ('Resume prompt', 'Objective and acceptance', 'Authority and prohibitions',
+                'State', 'Decisions', 'Running now', 'Pending user decisions',
+                'Failed approaches', 'Verification', 'Next actions', 'Missing information')
+    path = Path(root).parent / 'draft.md'
+    path.write_text('---\n' + json.dumps(meta, indent=2) + '\n---\n' +
+                    ''.join('\n## ' + section + '\n\nNone.\n' for section in sections))
+    return path
