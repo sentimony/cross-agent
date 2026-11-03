@@ -491,6 +491,97 @@ def write_checkpoint(draft_path, args):
     return path
 
 
+def _changed_since(repo, head):
+    if not head:
+        return set()
+    raw = _git(repo, 'diff', '--name-status', '-z', head, '--')
+    if raw is None:
+        raise OSError('git diff against checkpoint HEAD failed')
+    parts = raw.split(b'\0')
+    result, index = set(), 0
+    while index < len(parts) and parts[index]:
+        status = parts[index]
+        count = 2 if status.startswith((b'R', b'C')) else 1
+        if index + count >= len(parts):
+            raise OSError('invalid git diff output')
+        result.update(os.fsdecode(name) for name in parts[index + 1:index + 1 + count])
+        index += count + 1
+    return result
+
+
+def resume_check(target, args):
+    current = _project(args.repo)
+    store = resolve_store(args)
+    result = {'verdict': None, 'transfer_id': None, 'path': None,
+              'drift': [], 'missing': [], 'candidates': []}
+    if target:
+        name = str(target)
+        path = store / (name + '.md') if re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', name) else Path(name).expanduser().absolute()
+    else:
+        latest = read_latest(store, current['worktree'])
+        if not latest:
+            result['candidates'] = [str(p) for p in sorted(store.glob('*.md')) if p.is_file() and not p.is_symlink()]
+            result['verdict'] = 'choose' if result['candidates'] else 'none'
+            return result
+        path = store / (latest + '.md')
+    result['path'] = str(path)
+    try:
+        raw = path.read_text(encoding='utf-8')
+        meta, body = parse_checkpoint(raw)
+        root = meta.get('project', {}).get('root', current['root']) if isinstance(meta.get('project'), dict) else current['root']
+        errors, _ = validate_checkpoint(meta, body, root, 'checkpoint')
+        errors += _secret_errors(raw)
+        if errors:
+            result['verdict'] = 'invalid'
+            return result
+    except (ValidationError, UnicodeError, FileNotFoundError):
+        result['verdict'] = 'invalid'
+        return result
+    result['transfer_id'] = meta['transfer_id']
+    old = meta['project']
+    old_common, new_common = old['git_common_dir'], current['git_common_dir']
+    if old_common and new_common:
+        same = Path(old_common).resolve() == Path(new_common).resolve()
+        if not same and old['repository'] and current['repository']:
+            same = normalize_remote(old['repository']) == normalize_remote(current['repository']) if '://' in old['repository'] or '@' in old['repository'] else old['repository'] == current['repository']
+    elif old_common or new_common:
+        same = False
+    else:
+        same = Path(old['root']).resolve() == Path(current['root']).resolve()
+    if not same:
+        result['verdict'] = 'blocked'
+        return result
+    drift = result['drift']
+    for key in ('branch', 'head'):
+        if old[key] != current[key]:
+            drift.append({'kind': key, 'detail': {'saved': old[key], 'current': current[key]}})
+    old_paths = set(old['dirty']) | set(old['untracked'])
+    new_paths = set(current['dirty']) | set(current['untracked'])
+    if old_paths != new_paths:
+        drift.append({'kind': 'dirty-set', 'detail': {'saved': sorted(old_paths), 'current': sorted(new_paths)}})
+    has_saved_head = old['head'] and _git(current['root'], 'cat-file', '-e', old['head'] + '^{commit}') is not None
+    changed = _changed_since(current['root'], old['head']) if current['git_common_dir'] and has_saved_head else set(new_paths)
+    changed.update(current['untracked'])
+    digests = old['dirty_digests']
+    content = {name for name in changed if name not in digests}
+    for name, saved in digests.items():
+        path_now = Path(current['root']) / name
+        try:
+            digest = hashlib.sha256()
+            with path_now.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            value = digest.hexdigest()
+        except FileNotFoundError:
+            value = 'deleted'
+        if value != saved:
+            content.add(name)
+    drift.extend({'kind': 'content', 'detail': name} for name in sorted(content))
+    result['missing'] = [name for name in meta['artifacts'] if not (Path(current['root']) / name).exists()]
+    result['verdict'] = 'drifted' if drift or result['missing'] else 'fresh'
+    return result
+
+
 def _common(parser):
     parser.add_argument('--repo', default=argparse.SUPPRESS)
     parser.add_argument('--store', default=argparse.SUPPRESS)
@@ -519,10 +610,14 @@ def main(argv=None):
             sub.add_argument('--keep', type=int, required=True)
             sub.add_argument('--all', action='store_true')
     args = parser.parse_args(argv)
-    if args.command not in ('facts', 'usage', 'write', 'validate'):
+    if args.command not in ('facts', 'usage', 'write', 'validate', 'resume-check'):
         parser.error(args.command + ' is not implemented yet')
     try:
         args.repo = getattr(args, 'repo', None)
+        if args.command == 'resume-check':
+            result = resume_check(args.path, args)
+            print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
+            return 0 if result['verdict'] in ('fresh', 'drifted') else 1
         if args.command == 'write':
             path = write_checkpoint(args.path, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
