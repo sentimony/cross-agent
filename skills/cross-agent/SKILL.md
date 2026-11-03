@@ -53,7 +53,10 @@ The host owns permissions, task classification, installed sources and session id
    adopted Codex session keeps measured rounds, but its session total stays incomplete.
    `--status` reads the registry without writing it and prints the repository's
    sessions: state, PID, elapsed time (until `finished_at` for a finished run) and, for
-   Claude Code, the last main-thread message and tool call from its transcript.
+   Claude Code, the last main-thread message and tool call from its transcript. A fresh
+   Claude Code run records the `--session-id` it was launched with as
+   `launch_cli_session_id` on the run, so `--status` reads its transcript while it runs;
+   that ID is never a resumable or owning binding.
    Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`, else its
    `HOME`/.claude. A Claude Code row also has `estimate`: tokens and cost summed from the
    main and subagent transcripts (see [CLI runtime](references/cli-runtime.md)). It is

@@ -303,6 +303,34 @@ print(json.dumps({'session_id':sid,'model':'claude-opus-5-5','effort':'low','res
         self.assertEqual(len({r['session_id'] for r in result.results}), 2)
         self.assertEqual(result.results[0]['target_identity'], result.results[1]['target_identity'])
 
+    def test_fresh_claude_run_records_its_launch_session_id_while_running(self):
+        seen = self.root / 'seen.json'
+        fixture = self.bin / 'claude'
+        fixture.write_text('''#!/usr/bin/env python3
+import json,sys
+sys.stdin.read()
+args=sys.argv[1:]
+sid=args[args.index('--session-id')+1]
+registry=json.load(open(%r))
+runs=[r for s in registry['sessions'].values() for r in s['runs'] if r['status']=='running']
+json.dump({'sid':sid,'runs':runs},open(%r,'w'))
+print(json.dumps({'session_id':sid,'model':'claude-opus-5-5','effort':'low','result':json.dumps({'schema_version':1,'status':'COMPLETED','output':'ok'})}))
+''' % (str(self.root / 'registry/registry.json'), str(seen)))
+        fixture.chmod(0o700)
+        policy = json.loads(json.dumps(self.policy))
+        policy['agents']['claude-code'] = {'models': {'claude-opus-5-5': ['low']},
+             'default_model': 'claude-opus-5-5', 'default_effort': 'low',
+             'profiles': ['read-only'], 'capabilities': {'read-only': 'supported'}}
+        host = replace(self.host, config=load_config(host_config=policy, role='consultation', profile='read-only'))
+        result = dispatch(parse_request('claude [read]'), host).results[0]
+        self.assertEqual(result['status'], 'COMPLETED', result)
+        observed = json.loads(seen.read_text())
+        [run] = observed['runs']
+        self.assertEqual(run['launch_cli_session_id'], observed['sid'])
+        codex = dispatch(parse_request('codex --new [read]'), self.host).results[0]
+        registry = json.loads((self.root / 'registry/registry.json').read_text())
+        self.assertNotIn('launch_cli_session_id', registry['sessions'][codex['session_id']]['runs'][-1])
+
     def test_missing_or_inaccessible_executable_is_unavailable(self):
         from unittest.mock import patch
         for error in (FileNotFoundError('CLI missing'), PermissionError('CLI inaccessible')):

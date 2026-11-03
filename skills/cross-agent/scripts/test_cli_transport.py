@@ -243,6 +243,32 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'modelUsage'
         self.assertEqual(row['last_text'], 'Starting W1')
         self.assertEqual(row['last_tool'], 'Bash: Show status')
 
+    def test_status_reads_a_fresh_running_claude_session_through_its_launch_id(self):
+        from cross_agent import status
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import finish_session, reserve_session, select_session
+        launch = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+        self.write_transcript(launch, [
+            {'type': 'assistant', 'timestamp': '2026-11-03T00:00:00Z', 'message': {
+                'id': 'm1', 'model': 'claude-opus-5-5',
+                'usage': {'input_tokens': 10, 'output_tokens': 5},
+                'content': [{'type': 'text', 'text': 'Working on W1'}]}}])
+        request = parse_request('claude opus high [x]')
+        agent = resolve_agents(request, self.host.config, 'claude')[0]
+        decision = select_session(request, self.host.task_context, agent, 'execution', 'execution')
+        self.assertIsNone(decision.cli_session_id)
+        run_id = reserve_session(self.host.task_context, decision, str(self.root / 'run'), launch)
+        [row] = status(self.host, self.root / '.claude')['sessions']
+        self.assertIsNone(row['cli_session_id'])
+        self.assertEqual(row['launch_cli_session_id'], launch)
+        self.assertEqual(row['last_text'], 'Working on W1')
+        self.assertEqual(row['estimate']['tokens']['output_tokens'], 5)
+        finish_session(self.host.task_context, decision.session_id, run_id, 'failed')
+        [row] = status(self.host, self.root / '.claude')['sessions']
+        self.assertIsNone(row['launch_cli_session_id'])
+        self.assertIsNone(row['last_text'])
+        self.assertIsNone(row['estimate'])
+
     def usage_fixture(self, calls_before=0):
         """claude -p fake reporting cumulative session usage: 100 input, 10 output, 0.25 USD per call."""
         counter = self.root / 'calls'

@@ -209,7 +209,8 @@ def _validate(data):
                     raise ValueError()
                 run_ids.add(run['run_id'])
                 running += run['status'] == 'running'
-                for name in ('cli_session_id', 'observed_cli_session_id', 'actual_model', 'actual_effort', 'reason', 'result_path'):
+                for name in ('cli_session_id', 'observed_cli_session_id', 'launch_cli_session_id',
+                             'actual_model', 'actual_effort', 'reason', 'result_path'):
                     if name in run and (not isinstance(run[name], str) or not run[name]):
                         raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
@@ -473,12 +474,25 @@ def _recover(session):
             raise StateError('SESSION_BUSY')
 
 
-def reserve_session(context, decision, artifact_path):
-    """Return host run UUID; atomically reject another live owner."""
+def reserve_session(context, decision, artifact_path, launch_cli_session_id=None):
+    """Return host run UUID; atomically reject another live owner.
+
+    launch_cli_session_id is the provider session ID the launcher assigns to a fresh
+    run (Claude Code --session-id). It only locates the run's transcript while it is
+    running; it is not a verified or resumable binding and owns nothing.
+    """
     if decision.status != 'READY':
         raise StateError(decision.reason)
     if not isinstance(artifact_path, str) or not Path(artifact_path).is_absolute():
         raise StateError('INVALID_ARTIFACT_PATH')
+    if launch_cli_session_id is not None:
+        if decision.cli_session_id is not None:
+            raise StateError('INVALID_UPDATE')
+        try:
+            if str(uuid.UUID(launch_cli_session_id)) != launch_cli_session_id:
+                raise ValueError()
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise StateError('INVALID_UPDATE') from exc
     with _registry(context) as data:
         session = _session(data, context, decision.session_id)
         if session.get('provider_conflicts'):
@@ -490,8 +504,11 @@ def reserve_session(context, decision, artifact_path):
             raise StateError('INCOMPATIBLE_SESSION')
         _recover(session)
         run_id = str(uuid.uuid4())
-        session['runs'].append(dict(run_id=run_id, pid=os.getpid(), status='running',
-                                    artifact_path=artifact_path, started_at=time.time()))
+        run = dict(run_id=run_id, pid=os.getpid(), status='running',
+                   artifact_path=artifact_path, started_at=time.time())
+        if launch_cli_session_id is not None:
+            run['launch_cli_session_id'] = launch_cli_session_id
+        session['runs'].append(run)
         session['status'] = 'running'
         return run_id
 

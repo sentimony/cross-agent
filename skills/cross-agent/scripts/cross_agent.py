@@ -434,13 +434,16 @@ def dispatch(request, host_context):
             entry['artifacts']['identity'] = str(run / 'identity.json')
             _text_file(run / 'brief.md', brief)
             _text_file(run / 'review.md', '')
-            run_id = reserve_session(host.task_context, decision, str(run))
+            resume = decision.resume and decision.cli_session_id is not None
+            cli_id = decision.cli_session_id if resume else str(uuid.uuid4())
+            # Only Claude Code takes the launcher's ID; recording it lets --status
+            # read the transcript of a fresh run before the provider confirms it.
+            launch_id = cli_id if not resume and agent.family == 'claude-code' else None
+            run_id = reserve_session(host.task_context, decision, str(run), launch_id)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
-            resume = decision.resume and decision.cli_session_id is not None
             builder = transport.build_resume_command if resume else transport.build_run_command
-            cli_id = decision.cli_session_id if resume else str(uuid.uuid4())
             argv = builder(agent.family, Path(host.workspace), run, agent.model, agent.effort,
                            cli_id, profile=decision.profile, context=context)
             if agent.family == 'antigravity':
@@ -735,14 +738,16 @@ def status(host, config_dir=None):
             except PermissionError:
                 alive = True
         cli = session.get('cli_session_id') or session.get('observed_cli_session_id')
+        launch = run.get('launch_cli_session_id') if run.get('status') == 'running' else None
         row = {'session_id': session['session_id'], 'task': tasks[session['task_id']]['canonical_issue']
                or session['task_id'], 'family': session['family'], 'model': session['model'],
-               'effort': session['effort'], 'cli_session_id': cli, 'state': session['status'],
+               'effort': session['effort'], 'cli_session_id': cli,
+               'launch_cli_session_id': launch, 'state': session['status'],
                'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
                'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
-        if session['family'] == 'claude-code' and cli:
-            transcript = claude_transcript(host.workspace, cli, config_dir, child_env)
+        if session['family'] == 'claude-code' and (cli or launch):
+            transcript = claude_transcript(host.workspace, cli or launch, config_dir, child_env)
             row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(transcript)
             row['estimate'] = transcript_estimate(transcript)
         rows.append(row)

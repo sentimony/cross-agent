@@ -35,6 +35,9 @@
     from its main and subagent transcripts; not billing data. Unreadable files and rows
     without input/output counts mark it `complete: false`; the largest copy of a
     message counts once.
+16. Record the `--session-id` of a fresh Claude Code run before it starts, so
+    `--status` shows its last message, tool and estimate while it runs; the ID stays a
+    run field and never becomes a resumable or owning binding.
 
 ## 0.0.1 - 2026-11-01
 

@@ -285,6 +285,29 @@ print(reserve_session(c,d,'/crashed/artifacts'))
 
 
 
+    def test_launch_session_id_is_a_run_field_and_never_a_binding(self):
+        launch = 'cccccccc-dddd-4eee-8fff-000000000000'
+        decision = self.choose()
+        for bad in ('not-a-uuid', launch.upper(), 7):
+            with self.subTest(bad=bad), self.assertRaisesRegex(StateError, 'INVALID_UPDATE'):
+                reserve_session(self.ctx, decision, '/artifacts', bad)
+        run = reserve_session(self.ctx, decision, '/artifacts', launch)
+        registry = json.loads((Path(self.ctx.registry_path) / 'registry.json').read_text())
+        session = registry['sessions'][decision.session_id]
+        self.assertEqual(session['runs'][-1]['launch_cli_session_id'], launch)
+        self.assertIsNone(session['cli_session_id'])
+        self.assertNotIn('observed_cli_session_id', session)
+        finish_session(self.ctx, decision.session_id, run, 'failed')
+        resumed = self.choose(Request('x', session_selector=decision.session_id))
+        self.assertIsNone(resumed.cli_session_id)
+        other = self.choose(Request('x', new_session=True))
+        run = reserve_session(self.ctx, other, '/other', launch)
+        update_session(self.ctx, other.session_id, run, cli_session_id='opaque-id')
+        finish_session(self.ctx, other.session_id, run)
+        bound = self.choose(Request('x', session_selector=other.session_id))
+        with self.assertRaisesRegex(StateError, 'INVALID_UPDATE'):
+            reserve_session(self.ctx, bound, '/bound', launch)
+
     def test_provider_binding_is_unique_across_all_host_session_keys(self):
         original = self.choose()
         run = reserve_session(self.ctx, original, '/original')
