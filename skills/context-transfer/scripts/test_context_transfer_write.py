@@ -85,6 +85,17 @@ class WriteTests(unittest.TestCase):
         second = ct.write_checkpoint(self.draft, self.args)
         self.assertEqual(ct.parse_checkpoint(second.read_text())[0]['previous_transfer_id'], first.stem)
 
+    def test_write_refreshes_when_dirty_file_content_changes(self):
+        for name in ('tracked', 'untracked'):
+            with self.subTest(name=name):
+                first = ct.write_checkpoint(self.draft, self.args)
+                (self.repo / name).write_text('updated content')
+                second = ct.write_checkpoint(self.draft, self.args)
+                self.assertNotEqual(first, second)
+                meta, _ = ct.parse_checkpoint(second.read_text())
+                self.assertEqual(meta['previous_transfer_id'], first.stem)
+                self.assertEqual(second, ct.write_checkpoint(self.draft, self.args))
+
     def test_failure_preserves_latest_and_removes_new_file(self):
         first = ct.write_checkpoint(self.draft, self.args)
         before = {p.name: p.read_bytes() for p in self.store.iterdir()}

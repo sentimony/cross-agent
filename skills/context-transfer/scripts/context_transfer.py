@@ -487,7 +487,7 @@ def write_checkpoint(draft_path, args):
         old, old_body = parse_checkpoint(old_path.read_text(encoding='utf-8'))
         old_model = {key: old.get(key) for key in ('task', 'verification', 'continuation', 'artifacts')}
         old_model['source'] = {'model': old.get('source', {}).get('model')}
-        keys = ('branch', 'head', 'dirty', 'untracked')
+        keys = ('branch', 'head', 'dirty', 'untracked', 'dirty_digests')
         if model == old_model and facts['delegated_sessions'] == old.get('delegated_sessions') and _without_resume(body) == _without_resume(old_body) and all(project[k] == old.get('project', {}).get(k) for k in keys):
             return old_path
     now = datetime.datetime.now(datetime.timezone.utc)
