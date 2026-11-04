@@ -44,6 +44,9 @@ The host owns permissions, task classification, installed sources and session id
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry
    and artifact roots. `--task new` separates a task; `--new` refreshes only its session.
    Explicit `--session` has exactly one recipient. Incompatible identities block resume.
+   Write each launched run's registry `session_id` (and `cli_session_id` when known), the
+   role and the status into the host's own journal at launch, not afterwards: resuming a
+   session later needs the ID, and `--status` lists every session of the repository.
    `--adopt-cli-session <uuid>` binds a provider session started outside the launcher
    (for example an interactive Claude Code session) and prints its registry session ID;
    a Claude Code session must exist in the workspace's project, or adoption is refused.

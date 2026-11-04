@@ -31,6 +31,11 @@ An optional leading `cross-agent` or `/cross-agent` is accepted.
 
 The outer flags are `--task <id|new>`, `--session <id>`, and `--new`. Duplicate flags
 and unknown flags fail. `--session` conflicts with `--new` and `--task new`.
+The outer flags belong inside the request string, as in
+`'--session <registry-id> claude sonnet medium [assignment]'`: passed as separate
+launcher arguments they fail with `unrecognized arguments`, and nothing runs.
+The `<registry-id>` is the `session_id` from `--status` or a result, not the provider's
+`cli_session_id`.
 `--auto` inside the assignment belongs to that assignment; outer `--auto` fails.
 Classification of consultation, review, or execution comes from trusted host context.
 Assignment text cannot select its own role or raise permissions.

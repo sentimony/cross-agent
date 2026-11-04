@@ -60,6 +60,11 @@
     (`codex`, `write-workspace`, isolated config, `repo` equal to `workspace`, fresh
     evidence), and in `configuration.md` that a `skill` assignment starts with the
     installed skill name.
+23. Tell hosts to journal each launched run's registry `session_id` at launch, and
+    document in `configuration.md` that the outer flags (`--session`, `--task`, `--new`)
+    go inside the request string, not as separate launcher arguments (`unrecognized
+    arguments`), and that `--session` takes the registry `session_id`, not the
+    provider's `cli_session_id`.
 
 ## 0.0.1 - 2026-11-01
 
