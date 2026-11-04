@@ -15,6 +15,12 @@
    `config_isolated: true`, `repo` equal to the resolved `workspace`, and non-empty
    `fresh_evidence`. A Claude Code policy (`family: claude-code`, `orchestrate`) makes the
    launcher return `UNAVAILABLE: execution needs verified scoped host policy`.
+   The Codex execution child runs with `-s workspace-write` (`sandbox_mode="workspace-write"`
+   on resume). That sandbox permits file edits in the workspace and local test runs, but in
+   an observed run it gave no network (`pnpm install`, `gh` and `git fetch` fail) and no
+   write access to `.git` (`git commit` fails); the child then returns
+   `USER_INPUT_REQUIRED` and may leave partial artifacts such as a package-manager store.
+   Do not assign Codex a task that needs network, dependency installation or commits.
    Claude Code execution is an orchestrator profile: the host policy lists `read`,
    `write-workspace` and `orchestrate`, with `delegation_blocked: true`; config is not
    isolated, because the child loads user, project and local settings (hooks, skills,

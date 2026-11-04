@@ -70,6 +70,10 @@
 25. `context-transfer` `write`, `facts` and `resume-check` report the store in use
     (`store: default`, `legacy (<path>); default store is empty, ...`, `custom (<path>)`),
     so a legacy store is never used silently.
+26. Name the limits of the Codex `execution` profile in `cli-runtime.md` (`workspace-write`
+    sandbox, no network, no `.git` writes) and add a "Prepare" rule in `SKILL.md`: tasks
+    needing network, dependency installation or commits go to a Claude Code executor
+    (request `20261104-1109`, items 1-2; the launcher warning, item 3, is pending).
 
 ## 0.0.1 - 2026-11-01
 

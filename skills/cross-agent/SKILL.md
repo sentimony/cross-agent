@@ -31,6 +31,11 @@ The host owns permissions, task classification, installed sources and session id
    orchestrates under an `orchestrate` host policy,
    Codex reviews or executes. An explicit `--config` replaces it. CLI presence or login
    supplies no authorization. Pending live capability remains unavailable.
+6. Choose the executor by the task. A Codex executor runs in a `workspace-write` sandbox
+   without network and without write access to `.git` (see
+   [cli-runtime.md](references/cli-runtime.md)): give it only file edits and local test
+   runs. A task that needs network, dependency installation or commits goes to a Claude
+   Code executor under the `orchestrate` host policy.
 
 ## Dispatch and continue
 
