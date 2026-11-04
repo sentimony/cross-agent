@@ -59,7 +59,12 @@ Inspect the failing case.
 None.
 ```
 
-By default Git worktrees share `<git common dir>/context-transfer/`. Outside Git the store
+By default every worktree of a Git repository shares `docs/context-transfer/` of the main
+checkout (the parent of the common Git directory), so a checkpoint survives a reboot and
+resumes from any worktree. The first use adds `docs/context-transfer/` to the local
+`.git/info/exclude` once, never to a tracked `.gitignore`. A legacy store at
+`<git common dir>/context-transfer/` that still holds checkpoints stays in use until it is
+emptied, and a bare or non-standard common directory keeps it too. Outside Git the store
 is under `$XDG_STATE_HOME/context-transfer/<slug>/`, or `~/.local/state/context-transfer/<slug>/`.
 `--store` overrides `CONTEXT_TRANSFER_DIR`, which overrides the default. Each checkpoint
 is `<transfer_id>.md`; `latest-<worktree slug>` points to the latest one. A slug is

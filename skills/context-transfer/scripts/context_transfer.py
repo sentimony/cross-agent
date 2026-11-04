@@ -111,13 +111,46 @@ def _project(repo):
             'dirty': sorted(dirty), 'untracked': sorted(untracked), 'dirty_digests': digests}
 
 
+PROJECT_STORE = Path('docs') / 'context-transfer'
+
+
+def _default_store(project):
+    """Default store of a git project: docs/context-transfer of the main checkout.
+
+    The main checkout is the parent of the common git directory, so every worktree of the
+    repository reads and writes the same checkpoints. A legacy store inside the common
+    directory that already holds checkpoints stays in use until it is emptied, so a
+    checkpoint is never lost silently. The new directory is added to .git/info/exclude.
+    """
+    common = Path(project['git_common_dir'])
+    legacy = common / 'context-transfer'
+    if common.name != '.git' or (legacy.is_dir() and any(legacy.glob('*.md'))):
+        return legacy
+    store = common.parent / PROJECT_STORE
+    _exclude_locally(project['root'], PROJECT_STORE.as_posix() + '/')
+    return store
+
+
+def _exclude_locally(root, pattern):
+    path = _text(_git(root, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'))
+    if path is None:
+        return
+    target = Path(path)
+    existing = target.read_text(encoding='utf-8') if target.is_file() else ''
+    if pattern in existing.splitlines():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open('a', encoding='utf-8') as stream:
+        stream.write(('' if not existing or existing.endswith('\n') else '\n') + pattern + '\n')
+
+
 def resolve_store(args):
     project = _project(args.repo)
     override = getattr(args, 'store', None) or os.environ.get('CONTEXT_TRANSFER_DIR')
     if override:
         store = Path(override).expanduser().absolute()
     elif project['git_common_dir']:
-        store = Path(project['git_common_dir']) / 'context-transfer'
+        store = _default_store(project)
     else:
         state = os.environ.get('XDG_STATE_HOME') or str(Path.home() / '.local/state')
         store = Path(state) / 'context-transfer' / slug(project['root'])
