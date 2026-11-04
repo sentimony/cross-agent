@@ -254,6 +254,108 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         third = dispatch(parse_request('codex --new [read]'), self.host).results[0]
         self.assertEqual(third['status'], 'COMPLETED')
 
+    def test_codex_identity_from_rollout_allows_resume(self):
+        # Real codex exec --json prints no session_meta; the rollout file names the model.
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        self.assertEqual(text.count(old), 1)
+        rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
+                   "day.mkdir(parents=True,exist_ok=True)\n"
+                   "with open(day/('rollout-2026-11-03T00-00-00-'+sid+'.jsonl'),'a') as f:\n"
+                   " f.write(json.dumps({'type':'session_meta','payload':{'id':sid}})+'\\n')\n"
+                   " f.write(json.dumps({'type':'turn_context','payload':{'model':'gpt-6.1-sol','effort':'low'}})+'\\n')")
+        fixture.write_text(text.replace(old, rollout))
+        first = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(first['status'], 'COMPLETED')
+        self.assertEqual(first['actual_model'], 'gpt-6.1-sol')
+        self.assertEqual(first['observed_identity']['model_basis'], 'provider-rollout')
+        second = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(second['status'], 'COMPLETED')
+        self.assertEqual(first['session_id'], second['session_id'])
+        self.assertEqual(first['cli_session_id'], second['cli_session_id'])
+
+    def test_invalid_handoff_keeps_child_status_for_resume(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "if 'MISMATCH' in brief:"
+        self.assertEqual(text.count(old), 1)
+        bad = ("if 'BADHANDOFF' in brief and 'Host answer' not in brief:\n"
+               " value.update(status='CONSULTATION_REQUIRED',output='Which option?',handoff={'question':'Which?'})\n")
+        fixture.write_text(text.replace(old, bad + old))
+        first = dispatch(parse_request('codex [BADHANDOFF]'), self.host).results[0]
+        self.assertEqual(first['status'], 'CONSULTATION_REQUIRED')
+        self.assertIs(first['handoff_invalid'], True)
+        self.assertEqual(first['output'], 'Which option?')
+        self.assertNotIn('handoff', first)
+        self.assertIn('"consultants": []', Path(first['artifacts']['brief']).read_text())
+        second = dispatch(parse_request('codex [BADHANDOFF]'), replace(self.host, answer={'choice': 'A'})).results[0]
+        self.assertEqual(second['status'], 'COMPLETED')
+        self.assertEqual(first['session_id'], second['session_id'])
+
+    def test_fenced_child_result_is_unwrapped(self):
+        from cross_agent import _answer
+        raw = '{"schema_version": 1, "status": "COMPLETED", "output": "done"}'
+        expected = {'status': 'COMPLETED', 'output': 'done'}
+        self.assertEqual(_answer('```json\n' + raw + '\n```\n'), expected)
+        self.assertEqual(_answer('  ```\n' + raw + '\n```  '), expected)
+        self.assertEqual(_answer('Here is the result:\n```json\n' + raw + '\n```'), expected)
+        self.assertEqual(_answer(raw), expected)
+        # Raw pretty-printed JSON whose output holds a fence parses as is.
+        nested = {'schema_version': 1, 'status': 'COMPLETED', 'output': 'see\n```json\n{}\n```'}
+        self.assertEqual(_answer(json.dumps(nested, indent=2)),
+                         {'status': 'COMPLETED', 'output': nested['output']})
+
+    def test_unusable_child_result_names_the_reason(self):
+        from cross_agent import _answer
+        raw = '{"schema_version": 1, "status": "COMPLETED", "output": "done"}'
+        with self.assertRaises(ValueError) as two:
+            _answer('```json\n' + raw + '\n```\n```json\n' + raw + '\n```')
+        self.assertTrue(str(two.exception).startswith('child result is not JSON v1: '))
+        with self.assertRaises(ValueError) as other:
+            _answer('```json\n{"hello": 1}\n```')
+        self.assertEqual(str(other.exception), 'invalid child result v1')
+
+    def test_non_json_child_result_fails_with_clear_reason(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "Path(args[args.index('-o')+1]).write_text(json.dumps(value))"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "Path(args[args.index('-o')+1]).write_text('All done, no JSON here')"))
+        result = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(result['status'], 'FAILED')
+        self.assertEqual(result['reason'], 'child result is not JSON v1: All done, no JSON here')
+
+    def test_fenced_child_result_completes_end_to_end(self):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "Path(args[args.index('-o')+1]).write_text(json.dumps(value))"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "Path(args[args.index('-o')+1]).write_text('Result:\\n```json\\n'+json.dumps(value)+'\\n```')"))
+        result = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(result['status'], 'COMPLETED')
+        self.assertEqual(result['output'], 'done')
+
+    def test_adopted_per_round_session_total_is_never_complete(self):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import adopt_session
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "value={'schema_version':1"
+        self.assertEqual(text.count(old), 1)
+        fixture.write_text(text.replace(old, "print(json.dumps({'type':'turn.completed','usage':"
+                           "{'input_tokens':100,'output_tokens':10}}),flush=True)\n" + old))
+        agent = resolve_agents(parse_request('codex [x]'), self.host.config, 'claude')[0]
+        sid = adopt_session(self.host.task_context, agent, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+        for _ in range(2):
+            entry = dispatch(parse_request('codex [read] --session ' + sid), self.host).results[0]
+            self.assertEqual(entry['status'], 'COMPLETED', entry)
+            self.assertIs(entry['usage']['identity_attested'], True)
+            self.assertIsNotNone(entry['usage']['tokens'])
+            self.assertIs(entry['usage']['session_total']['complete'], False)
+        fresh = dispatch(parse_request('codex --new [read]'), self.host).results[0]
+        self.assertIs(fresh['usage']['session_total']['complete'], True)
+
     def test_cancel_stops_remaining_recipients(self):
         from unittest.mock import patch
         with patch('cross_agent._process', return_value=('CANCELLED', 'SIGNAL')) as process:
@@ -282,6 +384,34 @@ print(json.dumps({'session_id':sid,'model':'claude-opus-5-5','effort':'low','res
         self.assertEqual(len({r['task_id'] for r in result.results}), 1)
         self.assertEqual(len({r['session_id'] for r in result.results}), 2)
         self.assertEqual(result.results[0]['target_identity'], result.results[1]['target_identity'])
+
+    def test_fresh_claude_run_records_its_launch_session_id_while_running(self):
+        seen = self.root / 'seen.json'
+        fixture = self.bin / 'claude'
+        fixture.write_text('''#!/usr/bin/env python3
+import json,sys
+sys.stdin.read()
+args=sys.argv[1:]
+sid=args[args.index('--session-id')+1]
+registry=json.load(open(%r))
+runs=[r for s in registry['sessions'].values() for r in s['runs'] if r['status']=='running']
+json.dump({'sid':sid,'runs':runs},open(%r,'w'))
+print(json.dumps({'session_id':sid,'model':'claude-opus-5-5','effort':'low','result':json.dumps({'schema_version':1,'status':'COMPLETED','output':'ok'})}))
+''' % (str(self.root / 'registry/registry.json'), str(seen)))
+        fixture.chmod(0o700)
+        policy = json.loads(json.dumps(self.policy))
+        policy['agents']['claude-code'] = {'models': {'claude-opus-5-5': ['low']},
+             'default_model': 'claude-opus-5-5', 'default_effort': 'low',
+             'profiles': ['read-only'], 'capabilities': {'read-only': 'supported'}}
+        host = replace(self.host, config=load_config(host_config=policy, role='consultation', profile='read-only'))
+        result = dispatch(parse_request('claude [read]'), host).results[0]
+        self.assertEqual(result['status'], 'COMPLETED', result)
+        observed = json.loads(seen.read_text())
+        [run] = observed['runs']
+        self.assertEqual(run['launch_cli_session_id'], observed['sid'])
+        codex = dispatch(parse_request('codex --new [read]'), self.host).results[0]
+        registry = json.loads((self.root / 'registry/registry.json').read_text())
+        self.assertNotIn('launch_cli_session_id', registry['sessions'][codex['session_id']]['runs'][-1])
 
     def test_missing_or_inaccessible_executable_is_unavailable(self):
         from unittest.mock import patch

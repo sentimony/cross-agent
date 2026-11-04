@@ -37,7 +37,7 @@ def main():
                 raise RuntimeError('Native agent is reachable in test environment: ' + name)
         # No host/provider/auth environment is inherited. Individual fixtures may
         # add fake executables only inside their own temporary bin directories.
-        for folder in ('skills/cross-agent/scripts', 'scripts'):
+        for folder in ('skills/cross-agent/scripts', 'skills/context-transfer/scripts', 'scripts'):
             result = subprocess.run([sys.executable, '-B', '-c', RUN_SUITE, folder],
                                     cwd=ROOT, env=env, check=False)
             if result.returncode:

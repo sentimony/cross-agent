@@ -172,7 +172,8 @@ def _validate(data):
                     or session['role'] not in ('review', 'consultation', 'execution')
                     or session['profile'] != ('execution' if session['role'] == 'execution' else 'read-only')
                     or session['status'] not in ('idle', 'running', 'completed', 'failed', 'blocked')
-                    or session['cli_session_id'] == ''):
+                    or session['cli_session_id'] == ''
+                    or type(session.get('adopted', False)) is not bool):
                 raise ValueError()
             conflicts = session.get('provider_conflicts', [])
             if not isinstance(conflicts, list):
@@ -208,7 +209,8 @@ def _validate(data):
                     raise ValueError()
                 run_ids.add(run['run_id'])
                 running += run['status'] == 'running'
-                for name in ('cli_session_id', 'observed_cli_session_id', 'actual_model', 'actual_effort', 'reason', 'result_path'):
+                for name in ('cli_session_id', 'observed_cli_session_id', 'launch_cli_session_id',
+                             'actual_model', 'actual_effort', 'reason', 'result_path'):
                     if name in run and (not isinstance(run[name], str) or not run[name]):
                         raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
@@ -222,8 +224,11 @@ def _validate(data):
         raise StateError('CORRUPT_REGISTRY') from exc
 
 
-@contextmanager
-def _registry(context):
+def _empty():
+    return {'schema_version': 1, 'tasks': {}, 'sessions': {}, 'conversations': {}}
+
+
+def _registry_dir(context):
     path = Path(context.registry_path)
     if not path.is_absolute() or '..' in path.parts:
         raise StateError('UNSAFE_REGISTRY_PATH')
@@ -231,6 +236,71 @@ def _registry(context):
     for parent in reversed((path,) + tuple(path.parents)):
         if parent.is_symlink():
             raise StateError('UNSAFE_REGISTRY_PATH')
+    return path
+
+
+def _open_snapshot(directory, attempts=3):
+    """Open registry.json for the lock-free read. A writer's os.replace between open
+    and fstat leaves the opened old inode with no links: reopen the current name.
+    Several links and every other unsafe case are still refused."""
+    for _ in range(attempts):
+        try:
+            fd = os.open('registry.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        except OSError as exc:
+            raise StateError('UNSAFE_REGISTRY_PATH') from exc
+        try:
+            st = os.fstat(fd)
+            if not (stat.S_ISREG(st.st_mode) and st.st_nlink == 0):
+                _private(st)
+                return fd
+        except BaseException:
+            os.close(fd)
+            raise
+        os.close(fd)
+    raise StateError('UNSAFE_REGISTRY_PATH')
+
+
+def _load(directory, snapshot=False):
+    try:
+        os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return _empty()
+    fd = (_open_snapshot(directory) if snapshot
+          else _open_private(directory, 'registry.json', os.O_RDONLY))
+    try:
+        with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+            raw = stream.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise StateError('REGISTRY_TOO_LARGE')
+            data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise StateError('CORRUPT_REGISTRY') from exc
+    _validate(data)
+    return data
+
+
+def read_registry(context):
+    """Validated snapshot without the lock or a rewrite; writers replace atomically.
+    A missing registry reads as empty and nothing is created."""
+    path = _registry_dir(context)
+    # Lock-free read assumes every writer goes through _registry, which publishes a
+    # complete fsynced temporary file with os.replace; a reader never sees a partial file.
+    try:
+        directory = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return _empty()
+    except OSError as exc:
+        raise StateError('UNSAFE_REGISTRY_PATH') from exc
+    try:
+        _private(os.fstat(directory), True)
+        return _load(directory, snapshot=True)
+    finally:
+        os.close(directory)
+
+
+@contextmanager
+def _registry(context):
+    path = _registry_dir(context)
     try:
         path.mkdir(mode=0o700)
     except FileExistsError:
@@ -249,21 +319,7 @@ def _registry(context):
                 if time.monotonic() >= deadline:
                     raise StateError('REGISTRY_BUSY')
                 time.sleep(0.01)
-        try:
-            os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
-        except FileNotFoundError:
-            data = {'schema_version': 1, 'tasks': {}, 'sessions': {}, 'conversations': {}}
-        else:
-            fd = _open_private(directory, 'registry.json', os.O_RDONLY)
-            try:
-                with os.fdopen(fd, 'r', encoding='utf-8') as stream:
-                    raw = stream.read(8 * 1024 * 1024 + 1)
-                    if len(raw) > 8 * 1024 * 1024:
-                        raise StateError('REGISTRY_TOO_LARGE')
-                    data = json.loads(raw)
-            except (ValueError, UnicodeError) as exc:
-                raise StateError('CORRUPT_REGISTRY') from exc
-            _validate(data)
+        data = _load(directory)
         yield data
         _validate(data)
         name = '.registry-' + str(uuid.uuid4())
@@ -363,6 +419,39 @@ def select_session(request, task_context, agent, role, profile):
                                agent.family, agent.model, agent.effort, role, profile)
 
 
+def adopt_session(context, agent, cli_session_id):
+    """Bind an existing provider session, started outside the launcher, to a new registry
+    session so later runs resume it. The trusted host supplies the ID; repeating the
+    call with the same agent and task returns the same session, any other owner,
+    including the same agent under another canonical issue, is refused."""
+    try:
+        provider = str(uuid.UUID(cli_session_id))
+    except (TypeError, ValueError, AttributeError):
+        raise StateError('INVALID_PROVIDER_SESSION')
+    if provider != cli_session_id.lower():
+        raise StateError('INVALID_PROVIDER_SESSION')
+    ctx = context
+    key = dict(repo=ctx.repo, family=agent.family, model=agent.model, effort=agent.effort,
+               role=agent.role, profile=agent.profile)
+    with _registry(ctx) as data:
+        for session in data['sessions'].values():
+            if session['family'] == agent.family and provider in _provider_bindings(session):
+                issue = data['tasks'][session['task_id']]['canonical_issue']
+                if all(session[k] == v for k, v in key.items()) and issue == ctx.canonical_issue:
+                    return session['session_id']
+                raise StateError('PROVIDER_SESSION_OWNED')
+        issue = ctx.canonical_issue
+        task_id = ('issue:' + quote(json.dumps([ctx.repo, issue], separators=(',', ':')), safe='')
+                   if issue else str(uuid.uuid4()))
+        data['tasks'].setdefault(task_id, {'task_id': task_id, 'repo': ctx.repo,
+                                           'canonical_issue': issue})
+        sid = str(uuid.uuid4())
+        data['sessions'][sid] = dict(key, task_id=task_id, session_id=sid,
+                                     cli_session_id=provider, observed_cli_session_id=provider,
+                                     adopted=True, status='idle', runs=[])
+        return sid
+
+
 def _session(data, context, session_id):
     session = data['sessions'].get(session_id)
     if not session or session['repo'] != context.repo:
@@ -385,12 +474,25 @@ def _recover(session):
             raise StateError('SESSION_BUSY')
 
 
-def reserve_session(context, decision, artifact_path):
-    """Return host run UUID; atomically reject another live owner."""
+def reserve_session(context, decision, artifact_path, launch_cli_session_id=None):
+    """Return host run UUID; atomically reject another live owner.
+
+    launch_cli_session_id is the provider session ID the launcher assigns to a fresh
+    run (Claude Code --session-id). It only locates the run's transcript while it is
+    running; it is not a verified or resumable binding and owns nothing.
+    """
     if decision.status != 'READY':
         raise StateError(decision.reason)
     if not isinstance(artifact_path, str) or not Path(artifact_path).is_absolute():
         raise StateError('INVALID_ARTIFACT_PATH')
+    if launch_cli_session_id is not None:
+        if decision.cli_session_id is not None:
+            raise StateError('INVALID_UPDATE')
+        try:
+            if str(uuid.UUID(launch_cli_session_id)) != launch_cli_session_id:
+                raise ValueError()
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise StateError('INVALID_UPDATE') from exc
     with _registry(context) as data:
         session = _session(data, context, decision.session_id)
         if session.get('provider_conflicts'):
@@ -402,8 +504,11 @@ def reserve_session(context, decision, artifact_path):
             raise StateError('INCOMPATIBLE_SESSION')
         _recover(session)
         run_id = str(uuid.uuid4())
-        session['runs'].append(dict(run_id=run_id, pid=os.getpid(), status='running',
-                                    artifact_path=artifact_path, started_at=time.time()))
+        run = dict(run_id=run_id, pid=os.getpid(), status='running',
+                   artifact_path=artifact_path, started_at=time.time())
+        if launch_cli_session_id is not None:
+            run['launch_cli_session_id'] = launch_cli_session_id
+        session['runs'].append(run)
         session['status'] = 'running'
         return run_id
 

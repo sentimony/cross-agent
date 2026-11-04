@@ -4,11 +4,13 @@ from dataclasses import asdict, dataclass, field, replace
 import json
 import math
 import os
+import pwd
 import re
 from pathlib import Path
 import signal
 import subprocess
 import threading
+import time
 import uuid
 
 import cross_agent_state as state_store
@@ -32,6 +34,7 @@ class HostContext:
     installed_skills: dict = field(default_factory=dict)
     assignment_kind: str = 'consultation'
     environment: object = None
+    pass_env: tuple = ()
     timeout_seconds: float = 600
     kill_grace_seconds: float = 1
     policy: object = None
@@ -124,7 +127,28 @@ def _process(argv, brief, run, host, env):
             signal.signal(sig, handler)
 
 
-def _provider(family, run):
+def _codex_turn_context(thread_id, env=None):
+    """Model and effort of the last turn in the child's Codex rollout for thread_id.
+
+    codex exec --json prints no model; Codex records it in turn_context events of
+    <CODEX_HOME or HOME/.codex>/sessions/YYYY/MM/DD/rollout-*-<thread_id>.jsonl."""
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
+    root = Path(env.get('CODEX_HOME') or Path(home) / '.codex') / 'sessions'
+    context = {}
+    for path in sorted(root.glob('*/*/*/rollout-*-' + thread_id + '.jsonl')):
+        for line in path.read_text('utf-8', errors='replace').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (isinstance(event, dict) and event.get('type') == 'turn_context'
+                    and isinstance(event.get('payload'), dict)):
+                context = {k: event['payload'].get(k) for k in ('model', 'effort')}
+    return context
+
+
+def _provider(family, run, requested_model=None, env=None):
     """Read only provider envelope fields, never identity in assistant content."""
     raw = (run / 'stdout.json').read_text('utf-8', errors='replace')
     observed = {}
@@ -152,6 +176,13 @@ def _provider(family, run):
                 for dest, source in (('actual_model', 'model'), ('actual_effort', 'reasoning_effort')):
                     if source in event['payload']:
                         observed[dest] = event['payload'][source]
+        observed['model_basis'] = 'provider' if observed.get('actual_model') is not None else None
+        if observed.get('actual_model') is None and parsed['session']:
+            context = _codex_turn_context(parsed['session'], env)
+            if context.get('model') is not None:
+                observed['actual_model'] = context['model']
+                observed['actual_effort'] = context.get('effort')
+                observed['model_basis'] = 'provider-rollout'
         answer = (run / 'review.md').read_text('utf-8') if (run / 'review.md').is_file() else ''
     else:
         payload = json.loads(raw)
@@ -163,6 +194,15 @@ def _provider(family, run):
             raise ValueError('invalid provider session ID')
         for dest, source in (('actual_model', 'model'), ('actual_effort', 'effort')):
             observed[dest] = payload.get(source)
+        observed['model_basis'] = 'provider' if observed['actual_model'] is not None else None
+        # claude -p reports no main-thread model, and modelUsage also lists subagent
+        # models. The requested model's presence is only a necessary condition; the
+        # identity rests on the launcher's own --model flag, recorded as model_basis.
+        model_usage = payload.get('modelUsage')
+        if (family == 'claude-code' and observed['actual_model'] is None
+                and isinstance(model_usage, dict) and requested_model in model_usage):
+            observed['actual_model'] = requested_model
+            observed['model_basis'] = 'launch-flag+modelUsage'
         if family == 'claude-code':
             answer, parsed = transport.parse_claude_output(raw)
             if payload.get('is_error'):
@@ -198,7 +238,7 @@ def _provider_ids(family, run):
     return ids
 
 
-def _usage(agent, reported, observed, decision, previous_run, run, round_no):
+def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False):
     previous = transport._read_usage(previous_run) if previous_run is not None else None
     # Failed or mismatched identity evidence is not a cumulative accounting base,
     # even when its raw provider totals look complete.
@@ -210,7 +250,7 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no):
         previous=previous, session=observed.get('cli_session_id'),
         expected_session=decision.cli_session_id,
         round_no=round_no,
-        rounds_previous=previous)
+        rounds_previous=previous, profile=decision.profile)
     usage['scope'] = 'round'
     usage['provider_session_id'] = observed.get('cli_session_id')
     usage['identity_attested'] = False
@@ -222,12 +262,38 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no):
         _, _, usage['delta_reason'] = transport.resume_usage(
             reported['tokens'], reported['cost_usd'], previous,
             observed.get('cli_session_id'), decision.cli_session_id, agent.family)
+    if adopted and previous_run is None and agent.family != 'codex':
+        # Cumulative totals of an adopted session include usage from before adoption:
+        # keep them as the session total and baseline, but this round is unmeasured.
+        usage.update(tokens=None, cost_usd=None, cost_basis='unknown', prices_as_of=None,
+                     target_total=transport._target_total(None, None, round_no),
+                     delta_reason='adopted session: no baseline')
+    if adopted and agent.family == 'codex':
+        # Per-round usage is measured, but usage before adoption is unknown.
+        usage['session_total']['complete'] = False
     _write(run / 'usage.json', usage)
     return usage
 
 
+FENCE = re.compile(r'```[ \t]*(?:json)?[ \t]*\n(.*?)\n?```', re.DOTALL | re.IGNORECASE)
+
+
+def _loads_result(text):
+    """Parse raw JSON first; fall back to the JSON inside a single fenced block."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        blocks = FENCE.findall(text.strip())
+        if len(blocks) != 1:
+            raise
+        return json.loads(blocks[0].strip())
+
+
 def _answer(text):
-    value = json.loads(text)
+    try:
+        value = _loads_result(text)
+    except ValueError:
+        raise ValueError('child result is not JSON v1: ' + text.strip()[:80]) from None
     if (not isinstance(value, dict) or type(value.get('schema_version')) is not int
             or value.get('schema_version') != 1 or value.get('status') not in STATUSES):
         raise ValueError('invalid child result v1')
@@ -240,7 +306,8 @@ def _answer(text):
         if (not isinstance(handoff, dict) or not isinstance(handoff.get('question'), str)
                 or not handoff['question'].strip()
                 or any(not isinstance(handoff.get(k), list) for k in ('options', 'evidence', 'consultants'))):
-            raise ValueError('invalid handoff')
+            # Keep the child's question resumable: the host answers from output.
+            return {'status': value['status'], 'output': value['output'], 'handoff_invalid': True}
     return {k: value[k] for k in ('status', 'output', 'handoff') if k in value}
 
 
@@ -265,10 +332,25 @@ def _owner_host(host, request):
 
 
 def _brief(request, host, role, family):
-    lines = ['You are a delegated agent. Never dispatch cross-agent or another agent.',
-             'Return only JSON: schema_version=1, status, output (text).',
+    orchestrator = (family == 'claude-code' and host.policy is not None
+                    and 'orchestrate' in getattr(host.policy, 'local_actions', ()))
+    delegation = ('You are a delegated orchestrator. Never dispatch cross-agent; your own '
+                  'subagents and the review commands the assignment names are allowed.'
+                  if orchestrator else
+                  'You are a delegated agent. Never dispatch cross-agent or another agent.')
+    lines = [delegation]
+    if orchestrator:
+        lines.append('No user is attached. A decision for the owner is status USER_INPUT_REQUIRED '
+                     'with handoff question, options, evidence and consultants (lists, may be '
+                     'empty); put your recommendation first in options. BLOCKED is only for a '
+                     'blocker no answer can lift; start its output with "Blocker: <one line>".')
+    lines += [
+             'Return only raw JSON, no code fence, no text before or after: '
+             'schema_version=1, status, output (text).',
              'Statuses: ' + ', '.join(sorted(STATUSES)) + '.',
-             'For consultation/user input include handoff: question, options, evidence, consultants.',
+             'For consultation/user input include handoff with all four fields, for example: '
+             + json.dumps({'handoff': {'question': 'Which option?', 'options': ['A', 'B'],
+                                       'evidence': [], 'consultants': []}}) + '.',
              'Stop at a required decision. Do not claim completion while work is pending.',
              'Host target snapshot:\n' + json.dumps(host.target_identity, sort_keys=True)]
     if host.skill_context is not None:
@@ -353,7 +435,7 @@ def dispatch(request, host_context):
                  'usage': {'tokens': None, 'cost_usd': None}}
         result.results.append(entry)
         run = run_id = decision = previous_run = None
-        cancelled = False
+        cancelled = adopted = False
         round_no = 1
         try:
             single = replace(request, agent_groups=(group,))
@@ -373,6 +455,7 @@ def dispatch(request, host_context):
             if decision.resume:
                 with state_store._registry(host.task_context) as registry:
                     runs = list(registry['sessions'][decision.session_id]['runs'])
+                    adopted = registry['sessions'][decision.session_id].get('adopted') is True
                 round_no = len(runs) + 1
                 if runs:
                     prior = Path(runs[-1]['artifact_path'])
@@ -399,18 +482,22 @@ def dispatch(request, host_context):
             entry['artifacts']['identity'] = str(run / 'identity.json')
             _text_file(run / 'brief.md', brief)
             _text_file(run / 'review.md', '')
-            run_id = reserve_session(host.task_context, decision, str(run))
+            resume = decision.resume and decision.cli_session_id is not None
+            cli_id = decision.cli_session_id if resume else str(uuid.uuid4())
+            # Only Claude Code takes the launcher's ID; recording it lets --status
+            # read the transcript of a fresh run before the provider confirms it.
+            launch_id = cli_id if not resume and agent.family == 'claude-code' else None
+            run_id = reserve_session(host.task_context, decision, str(run), launch_id)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
-            resume = decision.resume and decision.cli_session_id is not None
             builder = transport.build_resume_command if resume else transport.build_run_command
-            cli_id = decision.cli_session_id if resume else str(uuid.uuid4())
             argv = builder(agent.family, Path(host.workspace), run, agent.model, agent.effort,
                            cli_id, profile=decision.profile, context=context)
             if agent.family == 'antigravity':
                 transport.check_agy_isolation(env)
-            child_env = transport.reviewer_environment(env, agent.family, context=context)
+            child_env = transport.reviewer_environment(env, agent.family, pass_env=host.pass_env,
+                                                       context=context)
             entry['status'], entry['reason'] = _process(argv, brief, run, host, child_env)
             cancelled = entry['status'] == 'CANCELLED' or entry['reason'] == 'PROCESS_CLEANUP_UNCONFIRMED'
             # A rejected/failed completion can still have performed authorized
@@ -425,9 +512,10 @@ def dispatch(request, host_context):
                     raise
                 entry.setdefault('metadata_errors', []).append(str(exc))
             try:
-                text, observed, reported = _provider(agent.family, run)
+                text, observed, reported = _provider(agent.family, run, agent.model, child_env)
                 entry['observed_identity'] = observed
-                entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run, round_no)
+                entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
+                                        round_no, adopted)
                 entry['artifacts']['usage'] = str(run / 'usage.json')
             except (OSError, ValueError, TypeError) as exc:
                 if entry['status'] == 'COMPLETED':
@@ -435,9 +523,13 @@ def dispatch(request, host_context):
                 entry.setdefault('metadata_errors', []).append(str(exc))
             if entry['status'] == 'COMPLETED':
                 identity = transport.validate_actual_identity(agent.model, agent.effort,
-                                      decision.cli_session_id if resume else None, observed)
+                                      decision.cli_session_id if resume else None, observed,
+                                      effort_reported=agent.family != 'claude-code')
                 entry.update(identity)
-                entry['usage']['identity_attested'] = all(value != 'unknown' for value in identity.values())
+                # claude -p never reports effort; as for resume, session and model attest.
+                entry['usage']['identity_attested'] = all(
+                    value != 'unknown' for key, value in identity.items()
+                    if not (key == 'actual_effort' and agent.family == 'claude-code'))
                 _write(run / 'usage.json', entry['usage'])
                 fields = {k: v for k, v in identity.items() if v != 'unknown'}
                 # A known provider ID owns its continuity boundary even when
@@ -445,11 +537,15 @@ def dispatch(request, host_context):
                 if identity['cli_session_id'] != 'unknown':
                     fields['observed_cli_session_id'] = identity['cli_session_id']
                 # A session can resume only when provider identity is complete.
-                if identity['actual_model'] == 'unknown' or identity['actual_effort'] == 'unknown':
+                # claude -p never reports effort; its resume rests on session and model.
+                if identity['actual_model'] == 'unknown' or (
+                        identity['actual_effort'] == 'unknown' and agent.family != 'claude-code'):
                     fields.pop('cli_session_id', None)
                 if fields:
                     update_session(host.task_context, decision.session_id, run_id, **fields)
                 entry.update(_answer(text))
+                if entry['status'] == 'BLOCKED' and not entry.get('reason'):
+                    entry['reason'] = entry.get('output', '').strip().split('\n', 1)[0]
                 if host.integration is not None and entry['status'] == 'COMPLETED':
                     owner_host = dict(_owner_host(host, request), task_id=decision.task_id,
                                       session_id=decision.session_id, run_id=run_id,
@@ -499,11 +595,227 @@ def dispatch(request, host_context):
     return result
 
 
+def claude_transcript(workspace, cli_session_id, config_dir=None, env=None):
+    """Where Claude Code keeps a session started in workspace; resume finds only this one.
+
+    env is the child environment; an explicit config_dir wins over it."""
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
+    root = Path(config_dir) if config_dir else Path(
+        env.get('CLAUDE_CONFIG_DIR') or Path(home) / '.claude')
+    slug = re.sub(r'[^A-Za-z0-9]', '-', str(Path(workspace)))
+    return root / 'projects' / slug / (cli_session_id + '.jsonl')
+
+
+def _claude_child_env(host):
+    """The environment dispatch gives a Claude Code child, without per-run markers."""
+    env = dict(os.environ if host.environment is None else host.environment)
+    return transport.reviewer_environment(env, 'claude-code', pass_env=host.pass_env)
+
+
+def adopt(host, request, cli_session_id, config_dir=None):
+    if len(request.agent_groups) != 1:
+        raise ValueError('adopt requires exactly one agent')
+    agent = resolve_agents(request, host.config, host.host_family)[0]
+    if agent.family == 'claude-code':
+        transcript = claude_transcript(host.workspace, str(cli_session_id), config_dir,
+                                       _claude_child_env(host))
+        if not transcript.is_file():
+            raise ValueError('ADOPT_TRANSCRIPT_MISSING: no session %s in the workspace project %s'
+                             % (cli_session_id, transcript.parent))
+    return state_store.adopt_session(host.task_context, agent, cli_session_id)
+
+
+def _transcript_tail(path, limit=262144):
+    """Last main-thread assistant text and tool call; subagent (sidechain) rows are skipped."""
+    text = tool = at = None
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - limit))
+            rows = handle.read().decode('utf-8', errors='replace').splitlines()
+    except OSError:
+        return None, None, None
+    for line in reversed(rows):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or row.get('type') != 'assistant' or row.get('isSidechain'):
+            continue
+        message = row.get('message')
+        content = message.get('content') if isinstance(message, dict) else None
+        for item in reversed(content if isinstance(content, list) else []):
+            if not isinstance(item, dict):
+                continue
+            if tool is None and item.get('type') == 'tool_use':
+                given = item.get('input') if isinstance(item.get('input'), dict) else {}
+                tool = '%s: %s' % (item.get('name'), given.get('description') or given.get('command')
+                                   or given.get('file_path') or '')
+                tool = tool.rstrip(': ')[:200]
+            if text is None and item.get('type') == 'text' and item.get('text', '').strip():
+                text = item['text'].strip()[:500]
+        at = at or row.get('timestamp')
+        if text is not None and tool is not None:
+            break
+    return text, tool, at
+
+
+_ESTIMATE_KEYS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens',
+                  'cache_read_input_tokens')
+
+
+def _count_or_none(value):
+    return value if type(value) is int and value >= 0 else None
+
+
+def _estimate_usage(row):
+    """(key, model, usage) of an assistant row; usage None when its required counts
+    are missing or invalid; None for any row that carries no assistant usage."""
+    if not isinstance(row, dict) or row.get('type') != 'assistant':
+        return None
+    message = row.get('message')
+    if not isinstance(message, dict) or not isinstance(message.get('usage'), dict):
+        return None
+    raw = message['usage']
+    usage = {name: _count_or_none(raw.get(name)) for name in ('input_tokens', 'output_tokens')}
+    for name in ('cache_creation_input_tokens', 'cache_read_input_tokens'):
+        # Cache counters are optional: absent or null is 0, anything else must be a count.
+        usage[name] = 0 if raw.get(name) is None else _count_or_none(raw[name])
+    if any(value is None for value in usage.values()):
+        usage = None
+    key = next((value for value in (message.get('id'), row.get('requestId'))
+                if isinstance(value, str) and value), None)
+    model = message.get('model') if isinstance(message.get('model'), str) else 'unknown'
+    return key, model, usage
+
+
+def transcript_estimate(path):
+    """Estimated tokens and cost of a Claude Code session from its transcripts.
+
+    Reads the main transcript and its subagents/agent-*.jsonl files line by line and
+    sums message.usage of assistant rows per message.model. One API message spans
+    several rows, so each message.id (else requestId, else the row) counts once across
+    all files, as its copy with the largest output_tokens; this also drops subagent
+    rows a main file repeats. A row without valid input/output counts, or an
+    unreadable subagent file, makes the estimate incomplete; an unreadable main
+    transcript gives None. Prices come from cli_transport; a model missing there
+    makes the cost null. Not billing data.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return None
+    subagents = path.with_suffix('') / 'subagents'
+    extra = sorted(subagents.glob('agent-*.jsonl')) if subagents.is_dir() else []
+    best, complete, unread = {}, True, []
+    for index, source in enumerate([path] + extra):
+        try:
+            with open(source, 'rb') as handle:
+                for number, line in enumerate(handle):
+                    if b'"usage"' not in line:
+                        continue
+                    try:
+                        parsed = _estimate_usage(json.loads(line))
+                    except ValueError:
+                        continue
+                    if parsed is None:
+                        continue
+                    key, model, usage = parsed
+                    if usage is None:
+                        complete = False
+                        continue
+                    key = key or (index, number)
+                    if key not in best or usage['output_tokens'] > best[key][1]['output_tokens']:
+                        best[key] = (model, usage)
+        except OSError:
+            if source == path:
+                return None
+            complete = False
+            unread.append(str(source))
+    by_model = {}
+    for model, usage in best.values():
+        totals = by_model.setdefault(model, dict.fromkeys(_ESTIMATE_KEYS, 0))
+        for name in _ESTIMATE_KEYS:
+            totals[name] += usage[name]
+    tokens, cost, unpriced, models = dict.fromkeys(_ESTIMATE_KEYS, 0), 0.0, [], {}
+    for model, totals in sorted(by_model.items()):
+        # Zero-usage rows (for example <synthetic> notices) cost nothing and name no model.
+        if not any(totals.values()):
+            continue
+        written, read = totals['cache_creation_input_tokens'], totals['cache_read_input_tokens']
+        model_cost = transport.claude_cost(model, {
+            'input': totals['input_tokens'] + written + read, 'cached_input': read,
+            'cache_write': written, 'output': totals['output_tokens'], 'reasoning': 0})
+        models[model] = {'tokens': totals, 'cost_usd': model_cost}
+        for name in _ESTIMATE_KEYS:
+            tokens[name] += totals[name]
+        if model_cost is None:
+            unpriced.append(model)
+        else:
+            cost += model_cost
+    return {'tokens': tokens, 'cost_usd': None if unpriced else round(cost, 4),
+            'by_model': models, 'basis': 'transcript-estimate',
+            'prices_as_of': transport.PRICES_AS_OF, 'subagent_files': len(extra),
+            'unpriced_models': unpriced, 'complete': complete, 'unread_files': unread}
+
+
+def _elapsed(run):
+    """Run duration: until now while running, until finished_at once terminal."""
+    if not run.get('started_at'):
+        return None
+    end = time.time() if run.get('status') == 'running' else run.get('finished_at')
+    return round(end - run['started_at']) if end is not None else None
+
+
+def status(host, config_dir=None):
+    """Read-only view of this repository's sessions, newest run first."""
+    rows = []
+    data = state_store.read_registry(host.task_context)
+    sessions = [s for s in data['sessions'].values() if s['repo'] == host.task_context.repo]
+    tasks = data['tasks']
+    child_env = _claude_child_env(host)
+    for session in sessions:
+        run = session['runs'][-1] if session['runs'] else {}
+        alive = None
+        if run.get('status') == 'running':
+            try:
+                os.kill(run['pid'], 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+            except PermissionError:
+                alive = True
+        cli = session.get('cli_session_id') or session.get('observed_cli_session_id')
+        launch = run.get('launch_cli_session_id') if run.get('status') == 'running' else None
+        row = {'session_id': session['session_id'], 'task': tasks[session['task_id']]['canonical_issue']
+               or session['task_id'], 'family': session['family'], 'model': session['model'],
+               'effort': session['effort'], 'cli_session_id': cli,
+               'launch_cli_session_id': launch, 'state': session['status'],
+               'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
+               'elapsed_seconds': _elapsed(run),
+               'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
+        if session['family'] == 'claude-code' and (cli or launch):
+            transcript = claude_transcript(host.workspace, cli or launch, config_dir, child_env)
+            row['last_text'], row['last_tool'], row['last_at'] = _transcript_tail(transcript)
+            row['estimate'] = transcript_estimate(transcript)
+        rows.append(row)
+    rows.sort(key=lambda r: r['started_at'] or 0, reverse=True)
+    return {'schema_version': 1, 'sessions': rows}
+
+
+DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'default.json'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host-context', required=True, help='Explicit trusted host JSON, never child-provided')
-    parser.add_argument('--config', required=True, help='Explicit trusted agent configuration JSON')
-    parser.add_argument('request', help='One literal bracket request argument; no shell evaluation')
+    parser.add_argument('--config', default=str(DEFAULT_CONFIG),
+                        help='Trusted agent configuration JSON; defaults to the bundled config/default.json')
+    parser.add_argument('--adopt-cli-session', metavar='UUID',
+                        help='Bind this existing provider session to a registry session, print its ID and exit')
+    parser.add_argument('--status', action='store_true',
+                        help='Print the sessions of this repository with their last activity and exit')
+    parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
     args = parser.parse_args(argv)
     raw = json.loads(Path(args.host_context).read_text('utf-8'))
     task = TaskContext(**raw.pop('task_context'))
@@ -513,8 +825,23 @@ def main(argv=None):
         policy = raw['policy']
         policy['local_actions'] = tuple(policy['local_actions'])
         raw['policy'] = transport.VerifiedProfilePolicy(**policy)
+    if 'pass_env' in raw:
+        raw['pass_env'] = tuple(transport.validate_pass_env(raw['pass_env']))
     host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
                        task_context=task, **raw)
+    if args.status:
+        print(json.dumps(status(host), ensure_ascii=False, indent=1))
+        return 0
+    if args.request is None:
+        parser.error('request is required')
+    if args.adopt_cli_session:
+        try:
+            session_id = adopt(host, parse_request(args.request), args.adopt_cli_session)
+        except ValueError as exc:
+            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+            return 2
+        print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
+        return 0
     try:
         result = dispatch(parse_request(args.request), host)
     except (ValueError, transport.CrossReviewError) as exc:

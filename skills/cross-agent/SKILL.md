@@ -2,9 +2,9 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.1"
+  version: "0.0.2"
 license: MIT
-compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this unreleased package.
+compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
 ---
 
@@ -26,20 +26,55 @@ The host owns permissions, task classification, installed sources and session id
 4. Read [skill-context.md](references/skill-context.md) for an explicit skill. Resolve
    only host-allowlisted resources relative to its installed base. Missing/denied
    resources return `UNAVAILABLE`; never install a missing dependency implicitly.
-5. Use only explicitly configured agents and verified profiles. CLI presence or login
+5. Use only configured agents and verified profiles. Without `--config` the launcher
+   uses the owner-attested [default config](config/default.json): Claude Code reviews or
+   orchestrates under an `orchestrate` host policy,
+   Codex reviews or executes. An explicit `--config` replaces it. CLI presence or login
    supplies no authorization. Pending live capability remains unavailable.
+6. Choose the executor by the task. A Codex executor runs in a `workspace-write` sandbox
+   without network and without write access to `.git` (see
+   [cli-runtime.md](references/cli-runtime.md)): give it only file edits and local test
+   runs. A task that needs network, dependency installation or commits goes to a Claude
+   Code executor under the `orchestrate` host policy.
 
 ## Dispatch and continue
 
 1. Write private host/config JSON outside tracked files, then invoke:
 
    ```text
-   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json>      --config <agents-json> 'claude opus low [assignment]'
+   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
+     [--config <agents-json>] 'claude opus low [assignment]'
    ```
 
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry
    and artifact roots. `--task new` separates a task; `--new` refreshes only its session.
    Explicit `--session` has exactly one recipient. Incompatible identities block resume.
+   Write each launched run's registry `session_id` (and `cli_session_id` when known), the
+   role and the status into the host's own journal at launch, not afterwards: resuming a
+   session later needs the ID, and `--status` lists every session of the repository.
+   `--adopt-cli-session <uuid>` binds a provider session started outside the launcher
+   (for example an interactive Claude Code session) and prints its registry session ID;
+   a Claude Code session must exist in the workspace's project, or adoption is refused.
+   The same provider ID under another agent or canonical issue is refused. The first run
+   after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
+   the cumulative figures as the session total and the baseline for later runs. An
+   adopted Codex session keeps measured rounds, but its session total stays incomplete.
+   `--status` reads the registry without writing it and prints the repository's
+   sessions: state, PID, elapsed time (until `finished_at` for a finished run) and, for
+   Claude Code, the last main-thread message and tool call from its transcript. A fresh
+   Claude Code run records the `--session-id` it was launched with as
+   `launch_cli_session_id` on the run, so `--status` reads its transcript while it runs;
+   that ID is never a resumable or owning binding.
+   Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`, else its
+   `HOME`/.claude. A Claude Code row also has `estimate`: tokens and cost summed from the
+   main and subagent transcripts (see [CLI runtime](references/cli-runtime.md)). It is
+   not billing data, covers the interactive part before adoption too, and stays
+   separate from the launcher's exact `usage.json` figures.
+   An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes
+   its reason from the first output line. A `CONSULTATION_REQUIRED` or
+   `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps its status with
+   `handoff_invalid: true`: read the question from `output` and answer the same session.
+   Codex resume needs the provider rollout ([CLI runtime](references/cli-runtime.md)).
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.
@@ -52,6 +87,8 @@ The host owns permissions, task classification, installed sources and session id
    remains null; requested argv or assistant text never proves actual provider identity.
    `USER_INPUT_REQUIRED` stops for a user decision after required permitted consultation.
    `FAILED`, `BLOCKED`, `UNAVAILABLE`, `CANCELLED` retain partial evidence and coverage gaps.
+   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `context-transfer`.
+   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `context-transfer`.
 
 ## Security Model
 

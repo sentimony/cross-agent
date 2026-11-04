@@ -19,6 +19,10 @@ scanner counts brackets before tokenizing outer arguments; quotation marks insid
 an assignment are ordinary data. Escape a literal unmatched bracket with a backslash.
 Outer tokens use `shlex.split` with no shell execution or variable expansion.
 
+When the host classifies the assignment as `skill`, the first word inside the brackets is
+the installed skill name and the rest is its arguments. A free-text brief without that
+name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`.
+
 Each agent group is `<family> [model] [effort]`. Canonical families are `codex`,
 `claude-code`, and `antigravity`; input aliases `claude`, `gemini`, and `agy` remain
 available. Existing model aliases (`opus`, `sonnet`, `haiku`, `fable`, `sol`, `terra`,
@@ -27,6 +31,11 @@ An optional leading `cross-agent` or `/cross-agent` is accepted.
 
 The outer flags are `--task <id|new>`, `--session <id>`, and `--new`. Duplicate flags
 and unknown flags fail. `--session` conflicts with `--new` and `--task new`.
+The outer flags belong inside the request string, as in
+`'--session <registry-id> claude sonnet medium [assignment]'`: passed as separate
+launcher arguments they fail with `unrecognized arguments`, and nothing runs.
+The `<registry-id>` is the `session_id` from `--status` or a result, not the provider's
+`cli_session_id`.
 `--auto` inside the assignment belongs to that assignment; outer `--auto` fails.
 Classification of consultation, review, or execution comes from trusted host context.
 Assignment text cannot select its own role or raise permissions.
@@ -69,6 +78,24 @@ evidence. Every profile currently marked pending in that matrix must stay pendin
 until its live probe succeeds. Configuration parsing validates the status contract;
 it does not perform the probe. Antigravity execution remains unavailable even if a
 configuration incorrectly marks it supported.
+
+## Bundled default
+
+The launcher reads `config/default.json` from the installed skill when `--config` is
+omitted. It is an owner-attested default, not live probe evidence:
+
+1. `claude-code`: `claude-opus-5-5` (default) and `claude-fable-5-1`, every effort, and
+   `claude-sonnet-5-5` with `low`, `medium`, `high`; default `medium`, `read-only` and
+   `execution`. Execution needs a host policy whose
+   `local_actions` include `orchestrate` (see [CLI runtime](cli-runtime.md)).
+2. `codex`: `gpt-6.1-sol` (default) and `gpt-6.1-terra`, efforts `low`, `medium`,
+   `high`, default `medium`, `read-only` and `execution`.
+3. Antigravity is absent, so it stays unavailable until an explicit config adds it.
+
+An explicit `--config` replaces the default entirely; it is not layered on top. The
+`load_config` library function stays pure: it never reads the default itself. A host
+that wants the default as a ceiling passes it as `user_config` and its own policy as a
+narrowing layer.
 
 ## Explicit sources and restrictions
 

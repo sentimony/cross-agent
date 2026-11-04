@@ -155,6 +155,24 @@ _CLAUDE_POLICY = (
 )
 
 
+# Execution profile for a delegated Claude Code orchestrator: it keeps the user and
+# project settings (hooks, skills, instructions) and runs its own workspace tools and
+# subagents, but has no MCP servers and no web access. --tools limits the available
+# set to the allowlist, so inherited settings cannot grant an unlisted tool.
+_CLAUDE_EXEC_TOOLS = ("Bash,Read,Grep,Glob,Edit,Write,NotebookEdit,Agent,Skill,"
+                      "TaskStop,TodoWrite")
+
+
+_CLAUDE_EXEC_POLICY = (
+    "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+    "--tools", _CLAUDE_EXEC_TOOLS,
+    "--allowedTools", _CLAUDE_EXEC_TOOLS,
+    "--disallowedTools", "WebFetch,WebSearch,mcp__*",
+    "--strict-mcp-config",
+    "--setting-sources", "user,project,local",
+)
+
+
 _AGY_POLICY = ("--disable-slash-commands", "--print-timeout", "0")
 
 
@@ -228,13 +246,20 @@ def _profile_policy(reviewer, repo, profile, context, resume=False):
     if profile == "read-only":
         return
     policy = context.policy if context else None
-    if (reviewer != "codex" or not isinstance(policy, VerifiedProfilePolicy)
+    # codex executes with isolated config; claude-code executes only as an attested
+    # orchestrator that loads user/project settings, so config is not isolated.
+    actions = policy.local_actions if isinstance(policy, VerifiedProfilePolicy) else None
+    allowed = {"codex": ("read", "write-workspace"),
+               "claude-code": ("read", "write-workspace", "orchestrate")}.get(reviewer)
+    if (allowed is None or not isinstance(policy, VerifiedProfilePolicy)
             or policy.family != reviewer or policy.repo != str(Path(repo).resolve())
-            or not isinstance(policy.local_actions, tuple)
-            or not policy.local_actions
-            or any(action not in ("read", "write-workspace") for action in policy.local_actions)
-            or "write-workspace" not in policy.local_actions
-            or policy.delegation_blocked is not True or policy.config_isolated is not True
+            or not isinstance(actions, tuple)
+            or not actions
+            or any(action not in allowed for action in actions)
+            or "write-workspace" not in actions
+            or (reviewer == "claude-code" and "orchestrate" not in actions)
+            or policy.delegation_blocked is not True
+            or (reviewer == "codex" and policy.config_isolated is not True)
             or not isinstance(policy.fresh_evidence, str) or not policy.fresh_evidence.strip()
             or (resume and (not isinstance(policy.resume_evidence, str)
                             or not policy.resume_evidence.strip()))):
@@ -242,13 +267,15 @@ def _profile_policy(reviewer, repo, profile, context, resume=False):
                                "UNAVAILABLE: execution needs verified scoped host policy")
 
 
-def validate_actual_identity(model, effort, session_id, observed):
+def validate_actual_identity(model, effort, session_id, observed, effort_reported=True):
     """Validate provider evidence; a requested resume needs complete identity.
 
     observed uses actual_model, actual_effort and cli_session_id. Self-report and
     requested argv are not provider evidence. A non-None session_id pins a resume:
     every observed field must be present, known, and match its requested value.
     Fresh runs may report unknown fields, which cannot establish resumable identity.
+    effort_reported=False (claude -p reports no effort) lets a resume pin only the
+    model and session.
     Dispatcher must call this before accepting completion or persisting evidence.
     """
     if not isinstance(observed, Mapping):
@@ -258,7 +285,7 @@ def validate_actual_identity(model, effort, session_id, observed):
                           ("cli_session_id", session_id)):
         value = observed.get(key)
         if value is None or value == "unknown":
-            if session_id is not None:
+            if session_id is not None and (effort_reported or key != "actual_effort"):
                 raise CrossReviewError(EXIT_NO_SESSION,
                                        "incomplete resume identity: %s" % key)
             result[key] = "unknown"
@@ -513,7 +540,7 @@ def build_run_command(reviewer: str, repo: Path, run_dir: Path,
     if not _is_uuid(session_id):
         raise CrossReviewError(EXIT_INVALID_INPUT, "session_id must be a UUID")
     return (["claude", "-p", "--output-format", "json", "--model", model, "--effort", effort]
-            + list(_CLAUDE_POLICY)
+            + list(_claude_policy(profile))
             + ["--session-id", session_id])
 
 
@@ -544,8 +571,12 @@ def build_resume_command(reviewer: str, repo: Path, run_dir: Path,
                 + ["-o", str(Path(run_dir) / "review.md"), session_id, "-"])
 
     return (["claude", "-p", "--output-format", "json", "--model", model, "--effort", effort]
-            + list(_CLAUDE_POLICY)
+            + list(_claude_policy(profile))
             + ["--resume", session_id])
+
+
+def _claude_policy(profile: str) -> tuple:
+    return _CLAUDE_EXEC_POLICY if profile == "execution" else _CLAUDE_POLICY
 
 
 def _agy_command(model: str, effort: str) -> list:
@@ -866,7 +897,7 @@ def _target_total(cost_usd, rounds_previous, round_no) -> dict:
 def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills,
                 previous_run=None, previous=None, session=None,
                 expected_session=None, round_no: int = 1,
-                rounds_previous=None) -> dict:
+                rounds_previous=None, profile: str = "read-only") -> dict:
     """Assemble the usage.json record of one run.
 
     cost_usd is the CLI-reported cost and is used for claude only; the codex cost
@@ -875,6 +906,8 @@ def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills
     marks the session total incomplete. On a claude or antigravity resume tokens and
     cost_usd are the cumulative session figures the CLI reports; session and
     expected_session are the reported and the resumed session ids (see resume_usage).
+    profile is the run's profile: Claude Code execution enables skills, read-only
+    disables them.
     """
     priced = REVIEWERS[reviewer]["priced"]
     # Claude and agy report cumulative usage on resume; codex reports this run only.
@@ -896,7 +929,8 @@ def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills
         if cost_usd is None and tokens is not None:
             cost_usd = claude_cost(model, tokens)
             basis = "price-table" if cost_usd is not None else "unknown"
-        skills, note = [], "disabled by policy"
+        skills = []
+        note = "not detected" if profile == "execution" else "disabled by policy"
     return {
         "schema_version": USAGE_SCHEMA_VERSION,
         "reviewer": reviewer,

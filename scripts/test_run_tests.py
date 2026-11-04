@@ -16,6 +16,9 @@ class NonemptyDiscoveryTests(unittest.TestCase):
         core_scripts = root / 'skills/cross-agent/scripts'
         scripts.mkdir()
         core_scripts.mkdir(parents=True)
+        transfer_scripts = root / 'skills/context-transfer/scripts'
+        transfer_scripts.mkdir(parents=True)
+        (transfer_scripts / 'test_fixture.py').write_text('import unittest\nclass Fixture(unittest.TestCase):\n def test_fixture(self): self.assertTrue(True)\n')
         runner = scripts / 'run_tests.py'
         runner.write_bytes(Path(__file__).with_name('run_tests.py').read_bytes())
         test = 'import unittest\nclass Fixture(unittest.TestCase):\n def test_fixture(self):self.assertTrue(True)\n'
