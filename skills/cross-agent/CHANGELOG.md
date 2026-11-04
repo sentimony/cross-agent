@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.2 - 2026-11-04
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
    is omitted: Claude Code (Opus 5.5 default, Fable 5.1, Sonnet 5.5) reviews, Codex

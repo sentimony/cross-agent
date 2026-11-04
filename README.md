@@ -1,6 +1,6 @@
 # Cross Agent
 
-Experimental standalone agent delegation plugin and skill, version `0.0.1`.
+Experimental standalone agent delegation plugin and skill, version `0.0.2`.
 
 1. Consult another configured agent or delegate a host-installed skill while preserving
    compatible task, host session and provider session identity.
@@ -20,14 +20,12 @@ Experimental standalone agent delegation plugin and skill, version `0.0.1`.
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.1 | cross-agent, context-transfer |
+| [cross-agent](.) | 0.0.2 | cross-agent, context-transfer |
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
 | [cross-agent](skills/cross-agent/SKILL.md) | 0.0.2 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
 | [context-transfer](skills/context-transfer/SKILL.md) | 0.0.1 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
-
-Skill `cross-agent` 0.0.2 and the whole `context-transfer` skill (0.0.1) are unreleased; the released plugin is `0.0.1`.
 
 See [protocol](skills/cross-agent/references/protocol.md),
 [skill context](skills/cross-agent/references/skill-context.md),
@@ -46,7 +44,7 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 
 | Evidence | Local state |
 | --- | --- |
-| Plugin / skill versions | Independent manifests and skill metadata, each `0.0.1` |
+| Plugin / skill versions | Independent manifests and skill metadata, versioned independently |
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |

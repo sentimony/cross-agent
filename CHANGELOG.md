@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.2 - 2026-11-04
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
    is omitted: Claude Code (Opus 5.5 default, Fable 5.1, Sonnet 5.5) reviews, Codex
@@ -43,7 +43,7 @@
 18. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as
     the child's status plus `handoff_invalid: true` instead of `FAILED`; the brief
     shows an exact `handoff` JSON example.
-19. Add the separate context-transfer skill (0.0.1, not yet released) for saving and resuming
+19. Add the separate context-transfer skill (0.0.1) for saving and resuming
     session checkpoints, with an `argument-hint`, ready `resume <id>` commands after `write`
     and a validation message that names the index and type of an invalid `artifacts` entry
     (requests `20261104-0508`, `20261104-0500`).

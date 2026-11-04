@@ -1,6 +1,6 @@
 {
   "name": "cross-agent",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Delegate consultations and installed skills to explicitly configured agent CLIs with persistent task and provider session identities.",
   "author": {
     "name": "Ihor Orlovskyi",
