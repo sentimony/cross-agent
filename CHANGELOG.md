@@ -56,6 +56,10 @@
     prose around the block is discarded) and report an unparseable result as `child result
     is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
     `20261103-2343`).
+22. Document in `cli-runtime.md` that Codex execution needs its own host policy
+    (`codex`, `write-workspace`, isolated config, `repo` equal to `workspace`, fresh
+    evidence), and in `configuration.md` that a `skill` assignment starts with the
+    installed skill name.
 
 ## 0.0.1 - 2026-11-01
 

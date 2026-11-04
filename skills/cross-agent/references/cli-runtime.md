@@ -10,6 +10,11 @@
    read-only/execution profiles `supported` on the owner's attestation; it is not probe
    evidence. Replace it with an explicit `--config` where that attestation does not hold.
    No production execution policy is shipped.
+   Codex execution needs its own host policy, not the orchestrator one: `family: codex`,
+   `local_actions: ["read", "write-workspace"]`, `delegation_blocked: true`,
+   `config_isolated: true`, `repo` equal to the resolved `workspace`, and non-empty
+   `fresh_evidence`. A Claude Code policy (`family: claude-code`, `orchestrate`) makes the
+   launcher return `UNAVAILABLE: execution needs verified scoped host policy`.
    Claude Code execution is an orchestrator profile: the host policy lists `read`,
    `write-workspace` and `orchestrate`, with `delegation_blocked: true`; config is not
    isolated, because the child loads user, project and local settings (hooks, skills,
