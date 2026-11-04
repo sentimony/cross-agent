@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.3 - 2026-11-04
+
+1. `cross-agent` 0.0.3: document that `AMBIGUOUS_SESSION` is resolved with `--new` or
+   `--session <id>` inside the request string (request `20261104-0925`).
+2. `context-transfer` 0.0.2: document the default context usage thresholds (prepare 50%,
+   refresh 62%, rotate 75% of the window; 100000, 125000 and 150000 tokens when the window
+   is unknown) and how to override them (request `20261103-1917`).
+
 ## 0.0.2 - 2026-11-04
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`

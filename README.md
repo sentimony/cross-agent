@@ -1,6 +1,24 @@
 # Cross Agent
 
-Experimental standalone agent delegation plugin and skill, version `0.0.2`.
+Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
+other AI coding agents.
+
+Version: `v0.0.3`
+
+## Plugins
+
+| Plugin | Version | Skills |
+| --- | --- | --- |
+| [cross-agent](.) | 0.0.3 | cross-agent, context-transfer |
+
+## Skills
+
+| Skill | Version | Command | Description |
+| --- | --- | --- | --- |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.3 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.2 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
+
+## Overview
 
 1. Consult another configured agent or delegate a host-installed skill while preserving
    compatible task, host session and provider session identity.
@@ -16,16 +34,23 @@ Experimental standalone agent delegation plugin and skill, version `0.0.2`.
    not been verified for Codex, Claude Code or Antigravity. No compatibility promise
    follows from the presence of metadata.
 
-## Plugins and skills
+## Install
 
-| Plugin | Version | Skills |
-| --- | --- | --- |
-| [cross-agent](.) | 0.0.2 | cross-agent, context-transfer |
+Claude Code:
 
-| Skill | Version | Command | Description |
-| --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.2 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.1 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
+```bash
+claude plugin marketplace add sentimony/marketplace
+claude plugin install cross-agent@sentimony
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add sentimony/marketplace
+codex plugin add cross-agent@sentimony
+```
+
+## Documentation
 
 See [protocol](skills/cross-agent/references/protocol.md),
 [skill context](skills/cross-agent/references/skill-context.md),

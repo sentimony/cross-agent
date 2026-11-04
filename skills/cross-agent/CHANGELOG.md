@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.3 - 2026-11-04
+
+1. Document how to resolve `AMBIGUOUS_SESSION` inside the request string.
+
 ## 0.0.2 - 2026-11-04
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
