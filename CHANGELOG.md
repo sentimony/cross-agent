@@ -43,14 +43,14 @@
 18. Keep `CONSULTATION_REQUIRED`/`USER_INPUT_REQUIRED` with a malformed `handoff` as
     the child's status plus `handoff_invalid: true` instead of `FAILED`; the brief
     shows an exact `handoff` JSON example.
-19. Add the separate context-transfer skill for saving and resuming session checkpoints.
+19. Add the separate context-transfer skill (0.0.1, not yet released) for saving and resuming
+    session checkpoints, with an `argument-hint`, ready `resume <id>` commands after `write`
+    and a validation message that names the index and type of an invalid `artifacts` entry
+    (requests `20261104-0508`, `20261104-0500`).
 20. Accept a child result wrapped in one fenced code block (with or without a `json` tag,
     prose around the block is discarded) and report an unparseable result as `child result
     is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
     `20261103-2343`).
-21. `context-transfer` 0.0.2: add `argument-hint`, report ready `resume <id>` commands after
-    `write`, show a non-empty `artifacts` example and name the index and type of an invalid
-    artifact entry (requests `20261104-0508`, `20261104-0500`).
 
 ## 0.0.1 - 2026-11-01
 
