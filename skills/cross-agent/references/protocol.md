@@ -13,6 +13,27 @@
    `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
    which a reboot clears; nothing then lands in the project tree. The launcher does not
    choose or check these paths.
+   Minimal read-only consultation host JSON (`policy`, `answer` and `owner_context` are
+   omitted; `host_family` is the host's own family, `claude-code` or `codex`):
+
+   ```json
+   {
+     "task_context": {"registry_path": "<state>/registry", "repo": "<repo root>",
+                      "conversation_id": "<host conversation id>"},
+     "host_family": "claude-code",
+     "workspace": "<repo root>",
+     "artifact_root": "<state>/artifacts",
+     "target_identity": {"tree": "<tree fingerprint>"},
+     "role": "consultation",
+     "profile": "read-only"
+   }
+   ```
+
+   Add `assignment_kind: "skill"` and `installed_skills: {"<name>": {"origin": "<origin>",
+   "base": "<absolute skill dir>"}}` to run an installed skill. Execution profiles also
+   need `policy` (`family`, `repo`, `fresh_evidence`, `resume_evidence`, `local_actions`,
+   `delegation_blocked`, `config_isolated`; see [CLI runtime](cli-runtime.md)). `answer`
+   carries the host's reply to a prior `USER_INPUT_REQUIRED` handoff.
 3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient results.
    Each run records host session/run IDs, provider ID, actual model/effort, role/profile,
    operation, status, artifacts and usage. Registry schema1 remains compatible with the

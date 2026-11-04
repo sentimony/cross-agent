@@ -65,6 +65,11 @@
     go inside the request string, not as separate launcher arguments (`unrecognized
     arguments`), and that `--session` takes the registry `session_id`, not the
     provider's `cli_session_id`.
+24. Add a minimal working host JSON example to `protocol.md`, with the optional fields
+    (`assignment_kind`, `installed_skills`, `policy`, `answer`) listed separately.
+25. `context-transfer` `write`, `facts` and `resume-check` report the store in use
+    (`store: default`, `legacy (<path>); default store is empty, ...`, `custom (<path>)`),
+    so a legacy store is never used silently.
 
 ## 0.0.1 - 2026-11-01
 

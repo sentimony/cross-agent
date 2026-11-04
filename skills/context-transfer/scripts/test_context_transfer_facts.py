@@ -172,6 +172,39 @@ class FactsTest(unittest.TestCase):
                 self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(repo), store=None)), legacy)
             self.assertFalse((repo / 'docs/context-transfer').exists())
 
+    def test_store_report_names_legacy_and_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            repo = make_repo(tmp)
+            args = argparse.Namespace(repo=str(repo), store=None)
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                self.assertEqual(ct.store_report(ct.resolve_store(args), args), 'default')
+                legacy = repo / '.git/context-transfer'
+                legacy.mkdir()
+                (legacy / '20260101T000000Z-aaaaaaaa.md').write_text('x')
+                report = ct.store_report(ct.resolve_store(args), args)
+                self.assertTrue(report.startswith('legacy (%s); default store is empty' % legacy), report)
+                override = argparse.Namespace(repo=str(repo), store=tmp + '/custom')
+                self.assertTrue(ct.store_report(Path(tmp + '/custom'), override).startswith('custom ('))
+
+    def test_cli_prints_store_line_on_write_and_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            repo = make_repo(tmp)
+            legacy = repo / '.git/context-transfer'
+            legacy.mkdir()
+            (legacy / '20260101T000000Z-aaaaaaaa.md').write_text('x')
+            env = dict(os.environ, HOME=tmp + '/home')
+            draft = make_draft(repo)
+            base = [sys.executable, ct.__file__]
+            write = subprocess.run(base + ['write', '--repo', str(repo), str(draft)],
+                                   capture_output=True, text=True, env=env)
+            self.assertEqual(write.returncode, 0, write.stderr)
+            self.assertIn('\nstore: legacy (', write.stdout)
+            facts = subprocess.run(base + ['facts', '--repo', str(repo), '--json'],
+                                   capture_output=True, text=True, env=env, check=True)
+            self.assertTrue(json.loads(facts.stdout)['store'].startswith('legacy ('))
+
     def test_new_store_with_checkpoints_wins_over_legacy(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = os.path.realpath(tmp)

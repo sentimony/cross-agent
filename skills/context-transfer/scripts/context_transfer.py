@@ -161,6 +161,21 @@ def resolve_store(args):
     return store
 
 
+def store_report(store, args):
+    """Name the store kind so a legacy store is never used silently."""
+    if getattr(args, 'store', None) or os.environ.get('CONTEXT_TRANSFER_DIR'):
+        return 'custom (%s)' % store
+    project = _project(args.repo)
+    common = project['git_common_dir']
+    if not common:
+        return 'default'
+    common = Path(common)
+    default = _state_store(common if common.name != '.git' else common.parent)
+    if store == default:
+        return 'default'
+    return 'legacy (%s); default store is empty, checkpoints are not migrated automatically' % store
+
+
 def capture_delegated(host_context):
     if not host_context:
         return {'not_captured': 'no --host-context'}
@@ -755,19 +770,21 @@ def main(argv=None):
             return 0
         if args.command == 'resume-check':
             result = resume_check(args.path, args)
+            result['store'] = store_report(resolve_store(args), args)
             print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
             return 0 if result['verdict'] in ('fresh', 'drifted') else 1
         if args.command == 'write':
             path = write_checkpoint(args.path, args)
+            store_line = store_report(path.parent, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
             resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
             commands = '/context-transfer resume ' + path.stem
             codex = '$context-transfer resume ' + path.stem
             if getattr(args, 'json', False):
                 print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
-                                  'resume_command_codex': codex}))
+                                  'resume_command_codex': codex, 'store': store_line}))
             else:
-                print(str(path) + '\n' + resume + '\n' + commands + '\n' + codex)
+                print(str(path) + '\nstore: ' + store_line + '\n' + resume + '\n' + commands + '\n' + codex)
             return 0
         if args.command == 'validate':
             raw = Path(args.path).read_text(encoding='utf-8')
@@ -787,6 +804,7 @@ def main(argv=None):
             return 0
         facts = collect_facts(args.repo, getattr(args, 'host_context', None))
         facts['context'] = usage
+        facts['store'] = store_report(store, args)
         target = read_latest(store, facts['project']['worktree'])
         if target:
             facts['checkpoints'].append(str(store / (target + '.md')))
