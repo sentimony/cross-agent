@@ -16,6 +16,19 @@ Experimental standalone agent delegation plugin and skill, version `0.0.1`.
    not been verified for Codex, Claude Code or Antigravity. No compatibility promise
    follows from the presence of metadata.
 
+## Plugins and skills
+
+| Plugin | Version | Skills |
+| --- | --- | --- |
+| [cross-agent](.) | 0.0.1 | cross-agent, context-transfer |
+
+| Skill | Version | Command | Description |
+| --- | --- | --- | --- |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.2 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.1 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
+
+Skill `cross-agent` 0.0.2 is unreleased; the released plugin is `0.0.1`.
+
 See [protocol](skills/cross-agent/references/protocol.md),
 [skill context](skills/cross-agent/references/skill-context.md),
 [configuration](skills/cross-agent/references/configuration.md) and
