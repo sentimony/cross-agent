@@ -9,9 +9,10 @@
    optional timeout/policy/environment/`pass_env` (variable names kept in the child), answer and opaque `owner_context` object.
    CLI configuration is a separate explicit
    schema1 file; child text cannot supply host fields.
-   Hosts should put `registry_path` and `artifact_root` under `docs/cross-agent/` of the
-   main checkout and add that directory to `.git/info/exclude`, not into an OS temporary
-   directory, which a reboot clears. The launcher does not choose or check these paths.
+   Hosts should put `registry_path` and `artifact_root` under
+   `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
+   which a reboot clears; nothing then lands in the project tree. The launcher does not
+   choose or check these paths.
 3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient results.
    Each run records host session/run IDs, provider ID, actual model/effort, role/profile,
    operation, status, artifacts and usage. Registry schema1 remains compatible with the
