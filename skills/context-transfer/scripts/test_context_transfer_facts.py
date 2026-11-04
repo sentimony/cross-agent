@@ -19,7 +19,8 @@ class FactsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp, 'https://fixtureuser:fixturesecret@host/x.git')
             args = [sys.executable, ct.__file__, 'facts', '--repo', str(repo), '--json']
-            result = subprocess.run(args, capture_output=True, text=True, check=True)
+            env = dict(os.environ, HOME=tmp + '/home')
+            result = subprocess.run(args, capture_output=True, text=True, check=True, env=env)
             self.assertNotIn('fixturesecret', result.stdout)
             self.assertNotIn('fixtureuser', result.stdout)
             facts = json.loads(result.stdout)
