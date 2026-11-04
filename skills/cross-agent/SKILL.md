@@ -4,7 +4,7 @@ description: Use when the user asks a different agent CLI for a consultation, in
 metadata:
   version: "0.0.2"
 license: MIT
-compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this unreleased package.
+compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
 ---
 

@@ -47,15 +47,15 @@
     session checkpoints, with an `argument-hint`, ready `resume <id>` commands after `write`
     and a validation message that names the index and type of an invalid `artifacts` entry
     (requests `20261104-0508`, `20261104-0500`).
+20. Accept a child result wrapped in one fenced code block (with or without a `json` tag,
+    prose around the block is discarded) and report an unparseable result as `child result
+    is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
+    `20261103-2343`).
 21. `context-transfer` stores checkpoints outside the project by default, in
     `~/.sentimony/cross-agent/context-transfer/<slug>/` (slug of the main checkout, shared by
     all worktrees), so nothing is added to the project or to `.git/info/exclude`; a legacy
     store in the common Git directory or in `docs/context-transfer/` is used only while the
     new store holds no checkpoints (request `20261104-0624`, `cross-agent` part pending).
-20. Accept a child result wrapped in one fenced code block (with or without a `json` tag,
-    prose around the block is discarded) and report an unparseable result as `child result
-    is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
-    `20261103-2343`).
 22. Document in `cli-runtime.md` that Codex execution needs its own host policy
     (`codex`, `write-workspace`, isolated config, `repo` equal to `workspace`, fresh
     evidence), and in `configuration.md` that a `skill` assignment starts with the
