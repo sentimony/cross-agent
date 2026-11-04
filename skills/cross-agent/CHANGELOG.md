@@ -35,6 +35,10 @@
     executor, journaling of session IDs, the outer-flag form of `--session`, `--task` and
     `--new`, and a minimal working host JSON example in `protocol.md`.
 
+## [0.0.3] - 2026-11-04
+
+1. Document how to resolve `AMBIGUOUS_SESSION` inside the request string.
+
 ## 0.0.1 - 2026-11-01
 
 1. Extract generic delegation from the unpublished embedded workflow prototype.

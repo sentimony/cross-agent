@@ -2,7 +2,7 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.2"
+  version: "0.0.3"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
@@ -20,6 +20,7 @@ The host owns permissions, task classification, installed sources and session id
    `cross-agent [assignment] claude opus low` select the same assignment.
 2. Preserve the exact bracketed assignment. Its flags belong to the assigned skill.
    Outer flags are `--task`, `--session`, `--new`; outer `--auto` is invalid.
+   Resolve `AMBIGUOUS_SESSION` with `--new` or `--session <id>` inside the request string.
 3. Read [protocol.md](references/protocol.md) for host JSON and optional installed owner
    adapter requirements. The host explicitly classifies `consultation` or `skill`;
    ambiguous classification returns `USER_INPUT_REQUIRED` before dispatch.
