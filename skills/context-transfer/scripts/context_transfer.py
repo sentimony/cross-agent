@@ -127,20 +127,22 @@ def _default_store(project):
 
     The project key is the main checkout (the parent of a standard common git directory),
     so every worktree of a repository shares one store, and nothing lands in the project
-    tree or in .git/info/exclude. A legacy store that still holds checkpoints stays in use
-    until it is emptied, so a checkpoint is never lost silently: the common git directory's
-    context-transfer folder, then docs/context-transfer of the main checkout.
+    tree or in .git/info/exclude. A store that already holds checkpoints there always wins.
+    A legacy store is used only while the new one has none, so a checkpoint is never lost
+    silently: the common git directory's context-transfer folder, then docs/context-transfer
+    of the main checkout.
     """
     common = Path(project['git_common_dir'])
+    key = common if common.name != '.git' else common.parent
+    new = _state_store(key)
+    if _has_checkpoints(new):
+        return new
     legacy = common / 'context-transfer'
     if _has_checkpoints(legacy):
         return legacy
-    if common.name != '.git':
-        return _state_store(common)
-    main = common.parent
-    if _has_checkpoints(main / 'docs' / 'context-transfer'):
-        return main / 'docs' / 'context-transfer'
-    return _state_store(main)
+    if common.name == '.git' and _has_checkpoints(key / 'docs' / 'context-transfer'):
+        return key / 'docs' / 'context-transfer'
+    return new
 
 
 def resolve_store(args):

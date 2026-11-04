@@ -172,6 +172,19 @@ class FactsTest(unittest.TestCase):
                 self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(repo), store=None)), legacy)
             self.assertFalse((repo / 'docs/context-transfer').exists())
 
+    def test_new_store_with_checkpoints_wins_over_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            repo = make_repo(tmp)
+            for old in (repo / '.git/context-transfer', repo / 'docs/context-transfer'):
+                old.mkdir(parents=True)
+                (old / '20260101T000000Z-aaaaaaaa.md').write_text('x')
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                fresh = ct._state_store(repo)
+                fresh.mkdir(parents=True)
+                (fresh / '20260102T000000Z-bbbbbbbb.md').write_text('y')
+                self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(repo), store=None)), fresh)
+
     def test_unborn_detached_rename_and_special_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / 'space repo'

@@ -63,9 +63,9 @@ By default the store is `~/.sentimony/cross-agent/context-transfer/<slug>/`, out
 project tree: nothing is added to the project, `.gitignore` or `.git/info/exclude`, and a
 checkpoint survives a reboot. For a Git repository the slug is built from the main checkout
 (the parent of the common Git directory), so every worktree shares one store and resumes
-from any of them; outside Git it is built from the working directory. A legacy store that
-still holds checkpoints stays in use until it is emptied: `<git common dir>/context-transfer/`,
-then `docs/context-transfer/` of the main checkout. A bare or non-standard common directory
+from any of them; outside Git it is built from the working directory. A store with
+checkpoints there always wins. A legacy store is used only while it has none:
+`<git common dir>/context-transfer/`, then `docs/context-transfer/` of the main checkout. A bare or non-standard common directory
 uses its own slug.
 `--store` overrides `CONTEXT_TRANSFER_DIR`, which overrides the default. Each checkpoint
 is `<transfer_id>.md`; `latest-<worktree slug>` points to the latest one. A slug is
