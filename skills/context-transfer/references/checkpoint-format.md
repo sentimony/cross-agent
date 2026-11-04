@@ -4,7 +4,8 @@ A checkpoint is Markdown with a JSON object between `---` front matter lines. Wr
 UTF-8 draft with only the model-owned fields `task`, `verification`, `continuation`,
 `artifacts` and optional `source.model`. `write` supplies all other fields and rejects
 script-owned fields in a draft. Artifact paths are relative to the project root and must
-exist when writing; describe missing paths in `Missing information` instead.
+exist when writing; describe missing paths in `Missing information` instead. Each
+`artifacts` entry is a path string, not an object; describe its role in the body.
 
 The model owns `task.objective`, `task.status` (`in-progress`, `blocked`, `awaiting-user`,
 `done`), `task.next_action`, `verification.status` (`verified`, `partial`, `unverified`),
@@ -30,7 +31,7 @@ resume prompt.
   "task": {"objective": "Finish the parser", "status": "in-progress", "next_action": "Inspect the failing case"},
   "verification": {"status": "partial", "evidence": [{"claim": "Parser handles empty input", "check": "python3 -m unittest", "result": "passed"}]},
   "continuation": {"recommended_skills": [], "blockers": [], "pending_decisions": []},
-  "artifacts": [],
+  "artifacts": ["docs/plans/parser.md"],
   "source": {"model": "example"}
 }
 ---

@@ -398,9 +398,11 @@ def validate_checkpoint(meta, body, root, mode):
     if not isinstance(artifacts, list):
         errors.append('invalid artifacts')
     else:
-        for path in artifacts:
-            if not isinstance(path, str) or Path(path).is_absolute():
-                errors.append('invalid artifact path')
+        for index, path in enumerate(artifacts):
+            if not isinstance(path, str):
+                errors.append('artifacts[%d]: expected a relative path string, got %s' % (index, type(path).__name__))
+            elif Path(path).is_absolute():
+                errors.append('artifacts[%d]: expected a relative path string, got an absolute path' % index)
             elif isinstance(root, (str, Path)) and not (Path(root) / path).exists():
                 display = '[redacted]' if _secret_errors(path) else path
                 (errors if mode == 'draft' else warnings).append('missing artifact ' + display)
@@ -726,7 +728,13 @@ def main(argv=None):
             path = write_checkpoint(args.path, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
             resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
-            print(json.dumps({'path': str(path), 'resume_prompt': resume}) if getattr(args, 'json', False) else str(path) + '\n' + resume)
+            commands = '/context-transfer resume ' + path.stem
+            codex = '$context-transfer resume ' + path.stem
+            if getattr(args, 'json', False):
+                print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
+                                  'resume_command_codex': codex}))
+            else:
+                print(str(path) + '\n' + resume + '\n' + commands + '\n' + codex)
             return 0
         if args.command == 'validate':
             raw = Path(args.path).read_text(encoding='utf-8')

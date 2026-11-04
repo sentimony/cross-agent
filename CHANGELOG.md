@@ -48,6 +48,9 @@
     prose around the block is discarded) and report an unparseable result as `child result
     is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
     `20261103-2343`).
+21. `context-transfer` 0.0.2: add `argument-hint`, report ready `resume <id>` commands after
+    `write`, show a non-empty `artifacts` example and name the index and type of an invalid
+    artifact entry (requests `20261104-0508`, `20261104-0500`).
 
 ## 0.0.1 - 2026-11-01
 

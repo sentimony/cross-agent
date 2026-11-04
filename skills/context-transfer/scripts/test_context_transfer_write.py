@@ -120,6 +120,24 @@ class WriteTests(unittest.TestCase):
         self.assertTrue(any('ghp_' in e and 'exampleSecret' not in e for e in errors))
 
 
+    def test_artifact_object_names_index_and_type(self):
+        meta, body = ct.parse_checkpoint(self.draft.read_text())
+        meta['artifacts'] = ['ok', {'path': 'x', 'role': 'plan'}]
+        errors, _ = ct.validate_checkpoint(meta, body, self.repo, 'draft')
+        self.assertIn('artifacts[1]: expected a relative path string, got dict', errors)
+
+    def test_write_reports_resume_commands_and_argument_hint(self):
+        command = [sys.executable, ct.__file__]
+        args = ['--repo', str(self.repo), '--store', str(self.store)]
+        write = subprocess.run(command + ['write', *args, '--json', str(self.draft)], capture_output=True, text=True)
+        self.assertEqual(write.returncode, 0, write.stderr)
+        data = json.loads(write.stdout)
+        transfer_id = Path(data['path']).stem
+        self.assertEqual(data['resume_command'], '/context-transfer resume ' + transfer_id)
+        self.assertEqual(data['resume_command_codex'], '$context-transfer resume ' + transfer_id)
+        skill = (Path(ct.__file__).parent.parent / 'SKILL.md').read_text()
+        self.assertIn('argument-hint: "[save | resume [<path|id>]', skill)
+
     def test_secret_artifact_diagnostics_do_not_echo(self):
         secret = 'ghp_EXAMPLEVALUE'
         draft = make_draft(self.repo, artifacts=[secret])

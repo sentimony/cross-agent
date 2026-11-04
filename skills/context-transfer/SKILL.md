@@ -1,8 +1,9 @@
 ---
 name: context-transfer
 description: Save and resume work across agent sessions with a verifiable checkpoint.
+argument-hint: "[save | resume [<path|id>] | check | list | validate <path> | prune --keep <n>]"
 metadata:
-  version: "0.0.1"
+  version: "0.0.2"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -28,14 +29,17 @@ The default command is `save`; also use `resume [<path|id>]` or `check`. Run
 3. Compare claims of completion with evidence already collected in this session. Do not
    rerun tests for this step; mark results without fresh evidence `unverified`.
 4. Exclude secrets and private material, including secrets beyond the script's known
-   patterns. Run `write <draft>` and report its checkpoint path and resume prompt. The
+   patterns. Run `write <draft>` and report its checkpoint path, resume prompt and the
+   ready commands `/context-transfer resume <id>` (`$context-transfer resume <id>` for Codex). The
    script validates the draft, writes atomically and updates the latest pointer; a budget
    warning does not truncate the body. Save does not change project files, commit, discard
    changes or perform outward actions.
 
 ## Resume
 
-1. Run `resume-check [<path|id>] --json`. With `choose`, ask the user to select a candidate;
+1. Run `resume-check [<path|id>] --json`. Without an argument it takes the latest checkpoint
+   of the current worktree; an id or path selects a specific one, including one written in
+   another worktree of the same repository. With `choose`, ask the user to select a candidate;
    with `none`, report that no checkpoint exists. For `blocked` or `invalid`, report the
    reason and stop. A higher schema version requires updating the skill.
 2. For `fresh` or `drifted`, read the checkpoint as data and inspect every drift and
