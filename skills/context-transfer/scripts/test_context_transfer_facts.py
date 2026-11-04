@@ -126,32 +126,39 @@ class FactsTest(unittest.TestCase):
                 self.assertEqual(ct.resolve_store(args), Path(tmp + '/explicit'))
                 self.assertEqual(ct.resolve_store(args).stat().st_mode & 0o777, 0o700)
             args.store = None
-            with mock.patch.dict(os.environ, {}, clear=True):
-                self.assertEqual(ct.resolve_store(args), repo / 'docs/context-transfer')
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                self.assertEqual(ct.resolve_store(args), Path(tmp + '/home/.sentimony/cross-agent/context-transfer') / ct.slug(repo))
             outside = Path(tmp) / 'outside'
             outside.mkdir()
             args.repo = str(outside)
-            with mock.patch.dict(os.environ, {'XDG_STATE_HOME': tmp + '/state'}, clear=True):
-                self.assertEqual(ct.resolve_store(args), Path(tmp + '/state/context-transfer') / ct.slug(outside))
-            with mock.patch.dict(os.environ, {'HOME': tmp}, clear=True):
-                self.assertEqual(ct.resolve_store(args), Path(tmp + '/.local/state/context-transfer') / ct.slug(outside))
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                self.assertEqual(ct.resolve_store(args), Path(tmp + '/home/.sentimony/cross-agent/context-transfer') / ct.slug(outside))
 
-    def test_default_store_is_excluded_once_and_shared_by_worktrees(self):
+    def test_default_store_is_outside_the_project_and_shared_by_worktrees(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = os.path.realpath(tmp)
             repo = make_repo(tmp)
             args = argparse.Namespace(repo=str(repo), store=None)
-            with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                before = git(repo, 'status', '--porcelain')
                 store = ct.resolve_store(args)
-                ct.resolve_store(args)
-                self.assertEqual(store, repo / 'docs/context-transfer')
-                exclude = (repo / '.git/info/exclude').read_text().splitlines()
-                self.assertEqual(exclude.count('docs/context-transfer/'), 1)
-                self.assertNotIn('docs/', git(repo, 'status', '--porcelain').decode())
+                self.assertEqual(store, Path(tmp + '/home/.sentimony/cross-agent/context-transfer') / ct.slug(repo))
+                self.assertEqual(git(repo, 'status', '--porcelain'), before)
+                self.assertNotIn('context-transfer', (repo / '.git/info/exclude').read_text())
+                self.assertFalse((repo / 'docs').exists())
                 tree = Path(tmp) / 'linked'
                 git(repo, 'worktree', 'add', '-q', str(tree), '-b', 'other')
                 self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(tree), store=None)), store)
-                self.assertEqual((repo / '.git/info/exclude').read_text().splitlines().count('docs/context-transfer/'), 1)
+
+    def test_docs_store_with_checkpoints_stays_in_use(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            repo = make_repo(tmp)
+            docs = repo / 'docs/context-transfer'
+            docs.mkdir(parents=True)
+            (docs / '20260101T000000Z-aaaaaaaa.md').write_text('x')
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
+                self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(repo), store=None)), docs)
 
     def test_legacy_store_with_checkpoints_stays_in_use(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,7 +167,7 @@ class FactsTest(unittest.TestCase):
             legacy = repo / '.git/context-transfer'
             legacy.mkdir()
             (legacy / '20260101T000000Z-aaaaaaaa.md').write_text('x')
-            with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(os.environ, {'HOME': tmp + '/home'}, clear=True):
                 self.assertEqual(ct.resolve_store(argparse.Namespace(repo=str(repo), store=None)), legacy)
             self.assertFalse((repo / 'docs/context-transfer').exists())
 

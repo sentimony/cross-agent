@@ -111,37 +111,36 @@ def _project(repo):
             'dirty': sorted(dirty), 'untracked': sorted(untracked), 'dirty_digests': digests}
 
 
-PROJECT_STORE = Path('docs') / 'context-transfer'
+STATE_ROOT = ('.sentimony', 'cross-agent', 'context-transfer')
+
+
+def _state_store(key):
+    return Path.home().joinpath(*STATE_ROOT) / slug(key)
+
+
+def _has_checkpoints(directory):
+    return directory.is_dir() and any(directory.glob('*.md'))
 
 
 def _default_store(project):
-    """Default store of a git project: docs/context-transfer of the main checkout.
+    """Default store: ~/.sentimony/cross-agent/context-transfer/<project slug>.
 
-    The main checkout is the parent of the common git directory, so every worktree of the
-    repository reads and writes the same checkpoints. A legacy store inside the common
-    directory that already holds checkpoints stays in use until it is emptied, so a
-    checkpoint is never lost silently. The new directory is added to .git/info/exclude.
+    The project key is the main checkout (the parent of a standard common git directory),
+    so every worktree of a repository shares one store, and nothing lands in the project
+    tree or in .git/info/exclude. A legacy store that still holds checkpoints stays in use
+    until it is emptied, so a checkpoint is never lost silently: the common git directory's
+    context-transfer folder, then docs/context-transfer of the main checkout.
     """
     common = Path(project['git_common_dir'])
     legacy = common / 'context-transfer'
-    if common.name != '.git' or (legacy.is_dir() and any(legacy.glob('*.md'))):
+    if _has_checkpoints(legacy):
         return legacy
-    store = common.parent / PROJECT_STORE
-    _exclude_locally(project['root'], PROJECT_STORE.as_posix() + '/')
-    return store
-
-
-def _exclude_locally(root, pattern):
-    path = _text(_git(root, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'))
-    if path is None:
-        return
-    target = Path(path)
-    existing = target.read_text(encoding='utf-8') if target.is_file() else ''
-    if pattern in existing.splitlines():
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open('a', encoding='utf-8') as stream:
-        stream.write(('' if not existing or existing.endswith('\n') else '\n') + pattern + '\n')
+    if common.name != '.git':
+        return _state_store(common)
+    main = common.parent
+    if _has_checkpoints(main / 'docs' / 'context-transfer'):
+        return main / 'docs' / 'context-transfer'
+    return _state_store(main)
 
 
 def resolve_store(args):
@@ -152,8 +151,7 @@ def resolve_store(args):
     elif project['git_common_dir']:
         store = _default_store(project)
     else:
-        state = os.environ.get('XDG_STATE_HOME') or str(Path.home() / '.local/state')
-        store = Path(state) / 'context-transfer' / slug(project['root'])
+        store = _state_store(project['root'])
     if store.is_symlink():
         raise OSError('store is a symlink')
     store.mkdir(mode=0o700, parents=True, exist_ok=True)

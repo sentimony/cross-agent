@@ -47,10 +47,11 @@
     session checkpoints, with an `argument-hint`, ready `resume <id>` commands after `write`
     and a validation message that names the index and type of an invalid `artifacts` entry
     (requests `20261104-0508`, `20261104-0500`).
-21. `context-transfer` stores checkpoints in `docs/context-transfer/` of the main checkout
-    by default, shared by all worktrees, and adds it once to `.git/info/exclude`; a legacy
-    store in the common Git directory that holds checkpoints stays in use (request
-    `20261104-0624`, `cross-agent` part pending).
+21. `context-transfer` stores checkpoints outside the project by default, in
+    `~/.sentimony/cross-agent/context-transfer/<slug>/` (slug of the main checkout, shared by
+    all worktrees), so nothing is added to the project or to `.git/info/exclude`; a legacy
+    store in the common Git directory or in `docs/context-transfer/` that holds checkpoints
+    stays in use (request `20261104-0624`, `cross-agent` part pending).
 20. Accept a child result wrapped in one fenced code block (with or without a `json` tag,
     prose around the block is discarded) and report an unparseable result as `child result
     is not JSON v1: <first 80 characters>`; the child brief now asks for raw JSON (request
