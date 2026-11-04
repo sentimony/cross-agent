@@ -6,7 +6,7 @@ class PackageTests(unittest.TestCase):
         paths=['plugin.json','.claude-plugin/plugin.json','.antigravity-plugin/plugin.json']
         for name in paths:
             doc=json.loads((ROOT/name).read_text())
-            self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.2'))
+            self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.3'))
         self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['context-transfer', 'cross-agent'])
         self.assertFalse((ROOT/'.codex-plugin').exists())
     def test_frontmatter_license_changelog_and_reference_links(self):

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.3 - 2026-11-04
+
+1. Document how to resolve `AMBIGUOUS_SESSION` inside the request string.
+
 ## 0.0.2 - 2026-11-04
 
 1. Ship an owner-attested `config/default.json` that the launcher uses when `--config`
@@ -34,10 +38,6 @@
     network, no `.git` writes), a "Prepare" rule that routes such tasks to a Claude Code
     executor, journaling of session IDs, the outer-flag form of `--session`, `--task` and
     `--new`, and a minimal working host JSON example in `protocol.md`.
-
-## [0.0.3] - 2026-11-04
-
-1. Document how to resolve `AMBIGUOUS_SESSION` inside the request string.
 
 ## 0.0.1 - 2026-11-01
 
