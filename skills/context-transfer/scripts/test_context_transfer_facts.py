@@ -40,8 +40,7 @@ class FactsTest(unittest.TestCase):
             repo = make_repo(tmp)
             bare = Path(tmp) / 'bare.git'
             tree = Path(tmp) / 'linked'
-            subprocess.run(['git', 'clone', '--bare', str(repo), str(bare)],
-                           check=True, capture_output=True)
+            git(repo, 'clone', '--bare', str(repo), str(bare))
             git(bare, 'worktree', 'add', '--detach', str(tree), 'HEAD')
             head = git(tree, 'rev-parse', 'HEAD').decode().strip()
             worktrees = ct._project(tree)['worktrees']
