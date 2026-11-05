@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.4 - 2026-11-05
+
+1. Accept bounded UTF-8 assignment files without changing brackets or line endings.
+
 ## 0.0.3 - 2026-11-04
 
 1. Document how to resolve `AMBIGUOUS_SESSION` inside the request string.
