@@ -19,6 +19,23 @@ scanner counts brackets before tokenizing outer arguments; quotation marks insid
 an assignment are ordinary data. Escape a literal unmatched bracket with a backslash.
 Outer tokens use `shlex.split` with no shell execution or variable expansion.
 
+For arbitrary UTF-8 text, use the launcher option `--assignment-file <path>` and
+supply selectors and outer flags in the request string, for example:
+
+```sh
+python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
+  --assignment-file /path/to/brief.txt 'claude opus low --task new'
+```
+
+The file must be a regular file of at most 1 MiB (1,048,576 bytes). Choose its path from
+the trusted user or host, and check its contents for secrets before sending them to an
+agent CLI. Strict UTF-8 decoding preserves line endings, brackets, backslashes, and
+whitespace; unmatched brackets need no escaping. A missing, empty, whitespace-only,
+NUL-containing, or invalid UTF-8 file is rejected before launch or registry changes.
+A bracket assignment and a file together are ambiguous and rejected; a request without
+either assignment is also rejected. Role and profile still come from the trusted host
+context.
+
 When the host classifies the assignment as `skill`, the first word inside the brackets is
 the installed skill name and the rest is its arguments. A free-text brief without that
 name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`.
@@ -119,7 +136,7 @@ Import these objects from `scripts/cross_agent_request.py`:
 
 | Interface | Fields or result |
 | --- | --- |
-| `parse_request(text: str) -> Request` | Exact assignment interior plus normalized selectors/groups |
+| `parse_request(text: str, assignment_file_text: str = None) -> Request` | Exact assignment interior plus normalized selectors/groups |
 | `Request` | `assignment: str`, `agent_groups: tuple[AgentGroup, ...]`, `task_selector: str or None`, `session_selector: str or None`, `new_session: bool` |
 | `AgentGroup` | Canonical `family`, optional `model`, optional `effort` |
 | `load_config(*, host_config=None, project_config=None, user_config=None, role, profile) -> AgentConfig` | Validates explicit sources and merges restrictive layers |

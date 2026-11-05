@@ -55,6 +55,103 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
                     environment={'PATH': str(self.bin), 'HOME': str(self.root)},
                     timeout_seconds=2, kill_grace_seconds=.1)
 
+    def cli_base(self):
+        import sys
+        config = self.root / 'config.json'
+        config.write_text(json.dumps(self.policy))
+        host = self.root / 'host.json'
+        host.write_text(json.dumps({'task_context': {'registry_path': str(self.root / 'registry'),
+            'repo': str(self.root), 'conversation_id': 'conversation'}, 'role': 'consultation',
+            'profile': 'read-only', 'host_family': 'claude', 'workspace': str(self.root),
+            'artifact_root': str(self.root / 'artifacts'), 'target_identity': {'tree': 'snapshot'},
+            'environment': {'PATH': str(self.bin), 'HOME': str(self.root)}, 'timeout_seconds': 2}))
+        return [sys.executable, str(Path(__file__).with_name('cross_agent.py')),
+                '--host-context', str(host), '--config', str(config)]
+
+    def test_assignment_file_reaches_fake_cli_exactly(self):
+        import subprocess
+        brief = 'Unmatched [ and ] ]\r\n- [ ] café \\ path\r\n'
+        assignment = self.root / 'assignment.txt'
+        assignment.write_bytes(brief.encode('utf-8'))
+        capture = self.root / 'captured'
+        fake = self.bin / 'codex'
+        fixture = fake.read_text()
+        self.assertEqual(fixture.count('brief=sys.stdin.read()'), 1)
+        script = fixture.replace('brief=sys.stdin.read()',
+            "brief=sys.stdin.buffer.read(); Path(%r).write_bytes(brief); brief=brief.decode('utf-8')" % str(capture))
+        fake.write_text(script)
+        result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode() + result.stdout.decode())
+        self.assertTrue(capture.read_bytes().endswith(b'Assignment (data):\n' + brief.encode('utf-8')))
+
+    def test_invalid_file_sources_block_before_registry_or_launch(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        fake = self.bin / 'codex'
+        fixture = fake.read_text()
+        self.assertEqual(fixture.count('brief=sys.stdin.read()'), 1)
+        fake.write_text(fixture.replace('brief=sys.stdin.read()',
+            "Path(%r).write_text('launched'); brief=sys.stdin.read()" % str(self.root / 'launched')))
+        base = self.cli_base()
+        cases = [(b'', 'codex', 'empty assignment'), (b'  \n', 'codex', 'empty assignment'),
+                 (b'bad\x00text', 'codex', 'NUL'), (b'bad\xff', 'codex', 'UTF-8'),
+                 (b'valid', 'codex [inline]', 'conflicts')]
+        for data, request, reason in cases:
+            for mode in ([], ['--adopt-cli-session', '12345678-1234-1234-1234-123456789abc']):
+                with self.subTest(data=data, mode=mode):
+                    assignment.write_bytes(data)
+                    result = subprocess.run(base + mode + ['--assignment-file', str(assignment), request],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn(reason, json.loads(result.stdout)['reason'])
+                    self.assertFalse((self.root / 'registry').exists())
+                    self.assertFalse((self.root / 'launched').exists())
+        assignment.unlink()
+        result = subprocess.run(base + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('cannot read assignment file', json.loads(result.stdout)['reason'])
+        self.assertFalse((self.root / 'registry').exists())
+
+    def test_assignment_file_rejects_fifo_without_waiting(self):
+        import subprocess
+        assignment = self.root / 'fifo'
+        os.mkfifo(assignment)
+        try:
+            result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
+                                    capture_output=True, text=True, timeout=2)
+        except subprocess.TimeoutExpired:
+            self.fail('FIFO assignment blocked instead of being rejected')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('regular file', json.loads(result.stdout)['reason'])
+        self.assertFalse((self.root / 'registry').exists())
+
+    def test_assignment_file_rejects_over_limit_before_launch(self):
+        import subprocess
+        assignment = self.root / 'large'
+        assignment.write_bytes(b'a' * (1024 * 1024 + 1))
+        result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('exceeds', json.loads(result.stdout)['reason'])
+        self.assertFalse((self.root / 'registry').exists())
+
+    def test_assignment_file_accepts_limit(self):
+        from cross_agent import read_assignment_file
+        assignment = self.root / 'limit'
+        assignment.write_bytes(b'a' * (1024 * 1024))
+        self.assertEqual(read_assignment_file(assignment), 'a' * (1024 * 1024))
+
+    def test_file_assignment_keeps_outer_selectors(self):
+        request = parse_request('codex gpt-6.1-sol low --task new', 'brief [')
+        self.assertEqual(request.assignment, 'brief [')
+        self.assertEqual(request.task_selector, 'new')
+        self.assertEqual(request.agent_groups[0].model, 'gpt-6.1-sol')
+        self.assertEqual(request.agent_groups[0].effort, 'low')
+        with self.assertRaisesRegex(ValueError, 'conflicts'):
+            parse_request('codex [inline]', 'file')
+
     def test_explicit_session_with_many_recipients_prevents_launch(self):
         from unittest.mock import patch
         with patch('cross_agent._process') as process:

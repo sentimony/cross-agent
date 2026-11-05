@@ -18,8 +18,9 @@ The host owns permissions, task classification, installed sources and session id
 1. Read [configuration.md](references/configuration.md) before parsing agent/model/effort
    selections. Both `cross-agent claude opus low [assignment]` and
    `cross-agent [assignment] claude opus low` select the same assignment.
-2. Preserve the exact bracketed assignment. Its flags belong to the assigned skill.
-   Outer flags are `--task`, `--session`, `--new`; outer `--auto` is invalid.
+2. Preserve the exact assignment, using either brackets or `--assignment-file <path>`.
+   Assignment flags belong to the assigned skill. Outer flags are `--task`, `--session`,
+   `--new`; outer `--auto` is invalid.
    Resolve `AMBIGUOUS_SESSION` with `--new` or `--session <id>` inside the request string.
 3. Read [protocol.md](references/protocol.md) for host JSON and optional installed owner
    adapter requirements. The host explicitly classifies `consultation` or `skill`;
@@ -45,6 +46,13 @@ The host owns permissions, task classification, installed sources and session id
    ```text
    python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
      [--config <agents-json>] 'claude opus low [assignment]'
+   ```
+
+   For a file containing the full UTF-8 brief, pass selectors separately:
+
+   ```text
+   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
+     --assignment-file /path/to/brief.txt 'claude opus low'
    ```
 
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry

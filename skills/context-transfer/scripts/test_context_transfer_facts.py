@@ -35,6 +35,61 @@ class FactsTest(unittest.TestCase):
             self.assertEqual(p['dirty_digests']['tracked'], hashlib.sha256(b'changed').hexdigest())
             self.assertTrue(p['branch'])
 
+    def test_bare_repository_keeps_linked_worktree_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            bare = Path(tmp) / 'bare.git'
+            tree = Path(tmp) / 'linked'
+            git(repo, 'clone', '--bare', str(repo), str(bare))
+            git(bare, 'worktree', 'add', '--detach', str(tree), 'HEAD')
+            head = git(tree, 'rev-parse', 'HEAD').decode().strip()
+            worktrees = ct._project(tree)['worktrees']
+            self.assertIsNotNone(worktrees)
+            by_path = {str(Path(item['path']).resolve()): item for item in worktrees}
+            self.assertEqual(by_path[str(bare.resolve())],
+                             {'path': str(bare.resolve()), 'head': None, 'branch': None})
+            self.assertEqual(by_path[str(tree.resolve())],
+                             {'path': str(tree.resolve()), 'head': head, 'branch': None})
+            store = Path(tmp) / 'store'
+            draft = make_draft(tree)
+            command = [sys.executable, ct.__file__, '--repo', str(tree), '--store', str(store), '--json']
+            written = subprocess.run(command[:2] + ['write'] + command[2:] + [str(draft)],
+                                     capture_output=True, text=True, check=True)
+            checkpoint = json.loads(written.stdout)['path']
+            resumed = subprocess.run(command[:2] + ['resume-check'] + command[2:] + [checkpoint],
+                                     capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(resumed.stdout)['verdict'], 'fresh')
+
+    def test_malformed_non_bare_worktree_is_unverified(self):
+        raw = b'worktree /valid\0HEAD abc\0\0worktree /broken\0\0'
+        with mock.patch.object(ct, '_git', return_value=raw):
+            self.assertIsNone(ct._related_git_facts('.')['worktrees'])
+
+    def test_related_facts_use_only_local_git_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            with mock.patch.object(ct, '_git', wraps=ct._git) as run_git:
+                project = ct._project(repo)
+            commands = [call.args[1:] for call in run_git.call_args_list]
+            self.assertTrue(any(cmd[:2] == ('worktree', 'list') for cmd in commands))
+            self.assertTrue(any(cmd[:1] == ('symbolic-ref',) for cmd in commands))
+            self.assertTrue(all(cmd[0] in {'rev-parse', 'remote', 'symbolic-ref', 'status', 'worktree'}
+                                for cmd in commands))
+            self.assertIsNone(project['default_branch'])
+            self.assertIsNone(project['origin_ref_head'])
+
+    def test_default_branch_facts_use_local_refs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            head = git(repo, 'rev-parse', 'HEAD').strip()
+            git(repo, 'update-ref', 'refs/heads/default-test', head)
+            git(repo, 'update-ref', 'refs/remotes/origin/default-test', head)
+            git(repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/default-test')
+            project = ct._project(repo)
+            self.assertEqual(project['default_branch'], 'default-test')
+            self.assertEqual(project['default_branch_head'], head.decode())
+            self.assertEqual(project['origin_ref_head'], head.decode())
+
     def test_facts_reports_latest_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp)

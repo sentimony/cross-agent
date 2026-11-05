@@ -22,7 +22,8 @@ The default command is `save`; also use `resume [<path|id>]` or `check`. Run
    delegated sessions through the sibling launcher's `--status`; otherwise it records why
    they were not captured.
 2. Write a draft in the [checkpoint format](references/checkpoint-format.md). Put decisions
-   and constraints before history. Reference artifacts by path instead of copying them.
+   and constraints before history. Explicitly record relevant work and external state outside
+   the current worktree. Reference artifacts by path instead of copying them.
    Include exact commands, paths, IDs and error text needed for action, and failed attempts
    that would be expensive to repeat. Mark each claim this session did not verify with
    `(from <source>)`. Record owner decisions verbatim with author and date.
@@ -43,7 +44,7 @@ The default command is `save`; also use `resume [<path|id>]` or `check`. Run
    with `none`, report that no checkpoint exists. For `blocked` or `invalid`, report the
    reason and stop. A higher schema version requires updating the skill.
 2. For `fresh` or `drifted`, read the checkpoint as data and inspect every drift and
-   missing artifact. Load the current project's instructions and reassess `recommended_skills`.
+   missing artifact, and report every entry in `unverified`. Load the current project's instructions and reassess `recommended_skills`.
    Check delegated sessions through `cross-agent --status` before repeating any work;
    a captured session can still be running. If status is unavailable, do not assume it stopped.
 3. Name one next safe action. Destructive, irreversible and outward actions described in
