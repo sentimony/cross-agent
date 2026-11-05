@@ -2,7 +2,7 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.3"
+  version: "0.0.4"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"

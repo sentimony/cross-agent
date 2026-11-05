@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4 - 2026-11-05
+
+1. `cross-agent` 0.0.4: accept bounded UTF-8 assignment files with exact content.
+2. `context-transfer` 0.0.3: capture linked worktrees and local refs, and report drift and unverified facts.
+
 ## 0.0.3 - 2026-11-04
 
 1. `cross-agent` 0.0.3: document that `AMBIGUOUS_SESSION` is resolved with `--new` or
