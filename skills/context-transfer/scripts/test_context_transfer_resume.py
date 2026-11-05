@@ -40,6 +40,58 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(result['verdict'], 'drifted')
         self.assertIn('head', [d['kind'] for d in result['drift']])
 
+    def test_origin_ref_drift_without_head_change(self):
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'update-ref', 'refs/remotes/origin/main', head)
+        git(self.repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+        path = ct.write_checkpoint(self.draft, self.args)
+        git(self.repo, 'commit', '--allow-empty', '-m', 'another')
+        newer = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'reset', '--soft', head)
+        git(self.repo, 'update-ref', 'refs/remotes/origin/main', newer)
+        result = self.check(str(path))
+        self.assertIn('origin-ref', [item['kind'] for item in result['drift']])
+        self.assertNotEqual(path, ct.write_checkpoint(self.draft, self.args))
+
+    def test_captured_refs_becoming_unavailable_are_drift(self):
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'update-ref', 'refs/heads/default-test', head)
+        git(self.repo, 'update-ref', 'refs/remotes/origin/default-test', head)
+        git(self.repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/default-test')
+        path = ct.write_checkpoint(self.draft, self.args)
+        git(self.repo, 'update-ref', '-d', 'refs/heads/default-test')
+        git(self.repo, 'update-ref', '-d', 'refs/remotes/origin/default-test')
+        result = self.check(str(path))
+        for kind in ('default-branch-ref', 'origin-ref'):
+            entry = next((d for d in result['drift'] if d['kind'] == kind), None)
+            self.assertIsNotNone(entry, kind)
+            self.assertIsNone(entry['detail']['current'])
+            self.assertTrue(entry['detail']['saved'])
+        self.assertEqual(result['verdict'], 'drifted')
+        self.assertIn('default_branch_head', result['unverified'])
+        self.assertIn('origin_ref_head', result['unverified'])
+
+    def test_linked_worktrees_unverified_legacy_and_deduplication(self):
+        first = ct.write_checkpoint(self.draft, self.args)
+        self.assertIn('default_branch', self.check()['unverified'])
+        tree = Path(self.tmp.name) / 'detached tree'
+        git(self.repo, 'worktree', 'add', '--detach', str(tree))
+        facts = ct.collect_facts(self.repo)['project']
+        detached = next(item for item in facts['worktrees'] if Path(item['path']).resolve() == tree.resolve())
+        self.assertIsNone(detached['branch'])
+        self.assertIn('worktrees', [d['kind'] for d in self.check()['drift']])
+        second = ct.write_checkpoint(self.draft, self.args)
+        self.assertNotEqual(first, second)
+        self.assertEqual(second, ct.write_checkpoint(self.draft, self.args))
+        meta, body = ct.parse_checkpoint(first.read_text())
+        for key in ('worktrees', 'default_branch', 'default_branch_head', 'origin_ref_head'):
+            del meta['project'][key]
+        first.write_text('---\n' + json.dumps(meta) + '\n---\n' + body)
+        result = self.check(str(first))
+        self.assertEqual(set(result['unverified']), {'worktrees', 'default_branch',
+                         'default_branch_head', 'origin_ref_head'})
+        self.assertNotEqual(result['verdict'], 'invalid')
+
     def test_branch_dirty_content_deleted_and_rename(self):
         ct.write_checkpoint(self.draft, self.args)
         git(self.repo, 'checkout', '-b', 'other')
@@ -78,7 +130,8 @@ class ResumeTests(unittest.TestCase):
             ('root', 1), ('worktree', []), ('git_common_dir', []),
             ('repository', []), ('branch', 1), ('head', []), ('dirty', None),
             ('dirty', [1]), ('untracked', [1]), ('dirty_digests', []),
-            ('dirty_digests', {'file': 1}))]
+            ('dirty_digests', {'file': 1}), ('worktrees', [{}]),
+            ('default_branch', []), ('default_branch_head', 3), ('origin_ref_head', {}))]
         cases += [('context', key, value) for key, value in (
             ('occupied_tokens', []), ('window_tokens', {}), ('percent', 'bad'),
             ('basis', []), ('threshold_mode', []))]

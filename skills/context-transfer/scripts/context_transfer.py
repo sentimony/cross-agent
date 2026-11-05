@@ -71,13 +71,46 @@ def _path_digest(path):
         return 'deleted'
 
 
+def _related_git_facts(root):
+    raw = _git(root, 'worktree', 'list', '--porcelain', '-z')
+    worktrees = None
+    if raw is not None:
+        worktrees = []
+        for record in raw.split(b'\0\0'):
+            if not record:
+                continue
+            fields = {}
+            for field in record.split(b'\0'):
+                key, _, value = field.partition(b' ')
+                fields[os.fsdecode(key)] = os.fsdecode(value)
+            if 'worktree' not in fields or 'HEAD' not in fields:
+                worktrees = None
+                break
+            branch = fields.get('branch')
+            worktrees.append({'path': fields['worktree'], 'head': fields['HEAD'],
+                              'branch': branch[len('refs/heads/'):] if branch and branch.startswith('refs/heads/') else branch})
+        if worktrees is not None:
+            worktrees.sort(key=lambda item: item['path'])
+    symbolic = _text(_git(root, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'))
+    prefix = 'refs/remotes/origin/'
+    name = symbolic[len(prefix):] if symbolic and symbolic.startswith(prefix) else None
+    if not name or name == 'HEAD':
+        name = None
+    local_ref = 'refs/heads/' + name if name else None
+    origin_ref = prefix + name if name else None
+    return {'worktrees': worktrees, 'default_branch': name,
+            'default_branch_head': _text(_git(root, 'rev-parse', '--verify', local_ref)) if local_ref else None,
+            'origin_ref_head': _text(_git(root, 'rev-parse', '--verify', origin_ref)) if origin_ref else None}
+
+
 def _project(repo):
     requested = Path(repo or os.getcwd()).resolve()
     root = _text(_git(requested, 'rev-parse', '--show-toplevel'))
     if root is None:
         return {'root': str(requested), 'worktree': str(requested), 'git_common_dir': None,
                 'repository': None, 'branch': None, 'head': None, 'dirty': [],
-                'untracked': [], 'dirty_digests': {}}
+                'untracked': [], 'dirty_digests': {}, 'worktrees': None, 'default_branch': None,
+                'default_branch_head': None, 'origin_ref_head': None}
     root = str(Path(root).resolve())
     common = _text(_git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
     remote = _text(_git(root, 'remote', 'get-url', 'origin'))
@@ -106,7 +139,8 @@ def _project(repo):
     for name in sorted(dirty | untracked):
         path = Path(root) / name
         digests[name] = _path_digest(path)
-    return {'root': root, 'worktree': root, 'git_common_dir': str(Path(common).resolve()),
+    related = _related_git_facts(root)
+    return {**related, 'root': root, 'worktree': root, 'git_common_dir': str(Path(common).resolve()),
             'repository': normalize_remote(remote), 'branch': branch, 'head': head,
             'dirty': sorted(dirty), 'untracked': sorted(untracked), 'dirty_digests': digests}
 
@@ -406,6 +440,17 @@ def validate_checkpoint(meta, body, root, mode):
             if not isinstance(digests, dict) or not all(isinstance(k, str) and isinstance(v, str)
                                                         for k, v in digests.items()):
                 errors.append('invalid project.dirty_digests')
+            for key in ('default_branch', 'default_branch_head', 'origin_ref_head'):
+                if key in project and project[key] is not None and (not isinstance(project[key], str) or '\x00' in project[key]):
+                    errors.append('invalid project.' + key)
+            if 'worktrees' in project and project['worktrees'] is not None:
+                trees = project['worktrees']
+                if not isinstance(trees, list) or not all(
+                    isinstance(item, dict) and set(item) == {'path', 'head', 'branch'}
+                    and all(isinstance(item[k], str) and '\x00' not in item[k] for k in ('path', 'head'))
+                    and (item['branch'] is None or isinstance(item['branch'], str) and '\x00' not in item['branch'])
+                    for item in trees):
+                    errors.append('invalid project.worktrees')
         if isinstance(source, dict) and isinstance(source.get('context'), dict):
             context = source['context']
             for key in ('occupied_tokens', 'window_tokens', 'percent'):
@@ -545,8 +590,9 @@ def write_checkpoint(draft_path, args):
         old, old_body = parse_checkpoint(old_path.read_text(encoding='utf-8'))
         old_model = {key: old.get(key) for key in ('task', 'verification', 'continuation', 'artifacts')}
         old_model['source'] = {'model': old.get('source', {}).get('model')}
-        keys = ('branch', 'head', 'dirty', 'untracked', 'dirty_digests')
-        if model == old_model and facts['delegated_sessions'] == old.get('delegated_sessions') and _without_resume(body) == _without_resume(old_body) and all(project[k] == old.get('project', {}).get(k) for k in keys):
+        keys = ('branch', 'head', 'dirty', 'untracked', 'dirty_digests', 'worktrees',
+                'default_branch', 'default_branch_head', 'origin_ref_head')
+        if model == old_model and facts['delegated_sessions'] == old.get('delegated_sessions') and _without_resume(body) == _without_resume(old_body) and all(k in old.get('project', {}) and project[k] == old['project'][k] for k in keys):
             return old_path
     now = datetime.datetime.now(datetime.timezone.utc)
     transfer_id = now.strftime('%Y%m%dT%H%M%SZ-') + os.urandom(4).hex()
@@ -608,7 +654,7 @@ def resume_check(target, args):
     current = _project(args.repo)
     store = resolve_store(args)
     result = {'verdict': None, 'transfer_id': None, 'path': None,
-              'drift': [], 'missing': [], 'candidates': []}
+              'drift': [], 'missing': [], 'candidates': [], 'unverified': []}
     if target:
         name = str(target)
         path = store / (name + '.md') if re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', name) else Path(name).expanduser().absolute()
@@ -650,6 +696,13 @@ def resume_check(target, args):
     for key in ('branch', 'head'):
         if old[key] != current[key]:
             drift.append({'kind': key, 'detail': {'saved': old[key], 'current': current[key]}})
+    for key, kind in (('worktrees', 'worktrees'), ('default_branch', 'default-branch'),
+                      ('default_branch_head', 'default-branch-ref'), ('origin_ref_head', 'origin-ref')):
+        saved, now = old.get(key), current.get(key)
+        if saved is None or now is None:
+            result['unverified'].append(key)
+        if saved is not None and saved != now:
+            drift.append({'kind': kind, 'detail': {'saved': saved, 'current': now}})
     old_paths = set(old['dirty']) | set(old['untracked'])
     new_paths = set(current['dirty']) | set(current['untracked'])
     if old_paths != new_paths:

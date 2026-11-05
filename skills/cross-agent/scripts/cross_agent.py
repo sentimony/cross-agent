@@ -8,6 +8,7 @@ import pwd
 import re
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -804,6 +805,21 @@ def status(host, config_dir=None):
 
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'default.json'
+MAX_ASSIGNMENT_BYTES = 1024 * 1024
+
+
+def read_assignment_file(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError('assignment file must be a regular file')
+            data = source.read(MAX_ASSIGNMENT_BYTES + 1)
+        if len(data) > MAX_ASSIGNMENT_BYTES:
+            raise ValueError('assignment file exceeds 1 MiB limit')
+        return data.decode('utf-8')
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError('cannot read assignment file as UTF-8: ' + str(exc)) from exc
 
 
 def main(argv=None):
@@ -813,6 +829,7 @@ def main(argv=None):
                         help='Trusted agent configuration JSON; defaults to the bundled config/default.json')
     parser.add_argument('--adopt-cli-session', metavar='UUID',
                         help='Bind this existing provider session to a registry session, print its ID and exit')
+    parser.add_argument('--assignment-file', metavar='PATH', help='Read assignment as strict UTF-8')
     parser.add_argument('--status', action='store_true',
                         help='Print the sessions of this repository with their last activity and exit')
     parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
@@ -834,16 +851,24 @@ def main(argv=None):
         return 0
     if args.request is None:
         parser.error('request is required')
+    try:
+        assignment = None
+        if args.assignment_file is not None:
+            assignment = read_assignment_file(args.assignment_file)
+        request = parse_request(args.request, assignment)
+    except ValueError as exc:
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+        return 2
     if args.adopt_cli_session:
         try:
-            session_id = adopt(host, parse_request(args.request), args.adopt_cli_session)
+            session_id = adopt(host, request, args.adopt_cli_session)
         except ValueError as exc:
             print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
             return 2
         print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
         return 0
     try:
-        result = dispatch(parse_request(args.request), host)
+        result = dispatch(request, host)
     except (ValueError, transport.CrossReviewError) as exc:
         print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
         return 2

@@ -71,7 +71,7 @@ def _text(value):
     return value
 
 
-def parse_request(text: str) -> Request:
+def parse_request(text: str, assignment_file_text: str = None) -> Request:
     """Extract exactly one balanced bracket envelope, preserving its interior bytes.
 
     Backslash escapes the next character for bracket counting only. Outer arguments
@@ -102,12 +102,23 @@ def parse_request(text: str) -> Request:
             depth -= 1
             if depth == 0:
                 end = index
-    if depth or start is None or end is None:
+    if assignment_file_text is not None and start is not None:
+        raise ValueError('assignment file conflicts with bracket assignment')
+    if depth or (start is not None and end is None):
         raise ValueError('one closed assignment required')
-    assignment = text[start + 1:end]
+    if assignment_file_text is None:
+        if start is None:
+            raise ValueError('one closed assignment required')
+        assignment = text[start + 1:end]
+        outer = text[:start] + ' ' + text[end + 1:]
+    else:
+        assignment = assignment_file_text
+        outer = text
     if not assignment.strip():
         raise ValueError('empty assignment')
-    tokens = shlex.split(text[:start] + ' ' + text[end + 1:])
+    if assignment_file_text is not None and '\x00' in assignment:
+        raise ValueError('assignment contains NUL')
+    tokens = shlex.split(outer)
     if tokens and tokens[0] in ('cross-agent', '/cross-agent'):
         tokens.pop(0)
     groups = []
