@@ -75,7 +75,9 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         assignment.write_bytes(brief.encode('utf-8'))
         capture = self.root / 'captured'
         fake = self.bin / 'codex'
-        script = fake.read_text().replace('brief=sys.stdin.read()',
+        fixture = fake.read_text()
+        self.assertEqual(fixture.count('brief=sys.stdin.read()'), 1)
+        script = fixture.replace('brief=sys.stdin.read()',
             "brief=sys.stdin.buffer.read(); Path(%r).write_bytes(brief); brief=brief.decode('utf-8')" % str(capture))
         fake.write_text(script)
         result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
@@ -87,7 +89,9 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         import subprocess
         assignment = self.root / 'assignment.txt'
         fake = self.bin / 'codex'
-        fake.write_text(fake.read_text().replace('brief=sys.stdin.read()',
+        fixture = fake.read_text()
+        self.assertEqual(fixture.count('brief=sys.stdin.read()'), 1)
+        fake.write_text(fixture.replace('brief=sys.stdin.read()',
             "Path(%r).write_text('launched'); brief=sys.stdin.read()" % str(self.root / 'launched')))
         base = self.cli_base()
         cases = [(b'', 'codex', 'empty assignment'), (b'  \n', 'codex', 'empty assignment'),

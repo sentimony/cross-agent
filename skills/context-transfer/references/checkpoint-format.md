@@ -18,7 +18,8 @@ The script owns `schema_version`, `transfer_id`, `created_at`, `previous_transfe
 `delegated_sessions`. Project facts include root, worktree, Git common directory, remote,
 branch, HEAD, dirty and untracked paths, content digests, linked worktrees, and local
 default-branch and origin ref values. The default branch comes only from local
-`refs/remotes/origin/HEAD`; unavailable values are null. These refs reflect the last local
+`refs/remotes/origin/HEAD`; unavailable values are null. A bare repository entry in the
+worktree list has null `head` and `branch`. These refs reflect the last local
 update and do not establish current server state. Old checkpoints remain valid; resume
 reports missing or unavailable facts in `unverified`. Delegated sessions contain
 session identity, task, family, model, effort, CLI session, state and liveness, or a

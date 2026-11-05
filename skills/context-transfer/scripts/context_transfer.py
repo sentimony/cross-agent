@@ -83,11 +83,12 @@ def _related_git_facts(root):
             for field in record.split(b'\0'):
                 key, _, value = field.partition(b' ')
                 fields[os.fsdecode(key)] = os.fsdecode(value)
-            if 'worktree' not in fields or 'HEAD' not in fields:
+            bare = 'bare' in fields and 'HEAD' not in fields and 'branch' not in fields
+            if 'worktree' not in fields or ('HEAD' not in fields and not bare):
                 worktrees = None
                 break
             branch = fields.get('branch')
-            worktrees.append({'path': fields['worktree'], 'head': fields['HEAD'],
+            worktrees.append({'path': fields['worktree'], 'head': fields.get('HEAD'),
                               'branch': branch[len('refs/heads/'):] if branch and branch.startswith('refs/heads/') else branch})
         if worktrees is not None:
             worktrees.sort(key=lambda item: item['path'])
@@ -447,8 +448,10 @@ def validate_checkpoint(meta, body, root, mode):
                 trees = project['worktrees']
                 if not isinstance(trees, list) or not all(
                     isinstance(item, dict) and set(item) == {'path', 'head', 'branch'}
-                    and all(isinstance(item[k], str) and '\x00' not in item[k] for k in ('path', 'head'))
+                    and isinstance(item['path'], str) and '\x00' not in item['path']
+                    and (item['head'] is None or isinstance(item['head'], str) and '\x00' not in item['head'])
                     and (item['branch'] is None or isinstance(item['branch'], str) and '\x00' not in item['branch'])
+                    and (item['head'] is not None or item['branch'] is None)
                     for item in trees):
                     errors.append('invalid project.worktrees')
         if isinstance(source, dict) and isinstance(source.get('context'), dict):
