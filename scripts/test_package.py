@@ -7,19 +7,19 @@ HIDDEN_PATHS = ('.claude-plugin/plugin.json', '.codex-plugin/plugin.json', '.ant
 class PackageTests(unittest.TestCase):
     def test_one_root_skill_and_manifest_identity(self):
         root=json.loads((ROOT/'plugin.json').read_text())
-        self.assertEqual((root['name'],root['version']),('cross-agent','0.0.5'))
+        self.assertEqual((root['name'],root['version']),('cross-agent','0.0.6'))
         self.assertEqual(root['skills'],'./skills/')
         self.assertEqual(root['$schema'],'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json')
         self.assertTrue(root['extensions']['com.openai']['interface'])
         for name in HIDDEN_PATHS:
             if name in KEPT_HIDDEN:
                 doc=json.loads((ROOT/name).read_text())
-                self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.5'))
+                self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.6'))
             else:
                 self.assertFalse((ROOT/name).exists(),name)
-        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['context-transfer', 'cross-agent'])
+        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['context-transfer', 'cross-agent', 'transfer-context'])
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.5'), ('context-transfer', '0.0.4')):
+        for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.5')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])
@@ -29,7 +29,7 @@ class PackageTests(unittest.TestCase):
                 self.assertTrue((skill/link).is_file(),link)
     def test_runtime_imports_are_local_or_stdlib(self):
         allowed = set('argparse ast base64 collections contextlib dataclasses datetime enum fcntl functools hashlib json math os pathlib pwd re shlex shutil signal stat subprocess sys tempfile threading time typing urllib uuid'.split())
-        for name in ('cross-agent', 'context-transfer'):
+        for name in ('cross-agent', 'transfer-context'):
             scripts = ROOT/'skills'/name/'scripts'
             local = {p.stem for p in scripts.glob('*.py') if not p.name.startswith('test_')}
             for path in scripts.glob('*.py'):

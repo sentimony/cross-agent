@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import context_transfer as ct
+import transfer_context as ct
 from ct_fixtures import make_repo, make_draft
 
 
@@ -25,11 +25,11 @@ class WriteTests(unittest.TestCase):
         self.draft = make_draft(self.repo)
 
     def test_delegated_sessions_through_fake_sibling(self):
-        scripts = Path(self.tmp.name) / 'skills/context-transfer/scripts'
+        scripts = Path(self.tmp.name) / 'skills/transfer-context/scripts'
         sibling = Path(self.tmp.name) / 'skills/cross-agent/scripts'
         scripts.mkdir(parents=True)
         sibling.mkdir(parents=True)
-        module = scripts / 'context_transfer.py'
+        module = scripts / 'transfer_context.py'
         shutil.copy(ct.__file__, module)
         fake = sibling / 'cross_agent.py'
         host = Path(self.tmp.name) / 'host.json'
@@ -133,8 +133,8 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(write.returncode, 0, write.stderr)
         data = json.loads(write.stdout)
         transfer_id = Path(data['path']).stem
-        self.assertEqual(data['resume_command'], '/context-transfer resume ' + transfer_id)
-        self.assertEqual(data['resume_command_codex'], '$context-transfer resume ' + transfer_id)
+        self.assertEqual(data['resume_command'], '/transfer-context resume ' + transfer_id)
+        self.assertEqual(data['resume_command_codex'], '$transfer-context resume ' + transfer_id)
         skill = (Path(ct.__file__).parent.parent / 'SKILL.md').read_text()
         self.assertIn('argument-hint: "[save | resume [<path|id>]', skill)
 

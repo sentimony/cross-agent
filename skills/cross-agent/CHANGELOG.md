@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.6 - 2026-11-07
+
+1. Name `transfer-context`, the new name of `context-transfer`, for handing state to a new session.
+
 ## 0.0.5 - 2026-11-07
 
 1. Document that `registry_path` names a directory holding `registry.json` and

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "top",
+  "groupings": [
+    {
+      "title": "Skills",
+      "description": "Cross-agent delegation (cross-agent) and checkpoints for resuming work across sessions (transfer-context).",
+      "skills": [
+        "cross-agent",
+        "transfer-context"
+      ]
+    },
+    {
+      "title": "Renamed skills",
+      "description": "Migration notices for skills that have moved to a new name.",
+      "skills": [
+        "context-transfer"
+      ]
+    }
+  ]
+}

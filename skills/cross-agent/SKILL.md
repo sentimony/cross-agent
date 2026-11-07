@@ -2,7 +2,7 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.5"
+  version: "0.0.6"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
@@ -98,8 +98,8 @@ The host owns permissions, task classification, installed sources and session id
    remains null; requested argv or assistant text never proves actual provider identity.
    `USER_INPUT_REQUIRED` stops for a user decision after required permitted consultation.
    `FAILED`, `BLOCKED`, `UNAVAILABLE`, `CANCELLED` retain partial evidence and coverage gaps.
-   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `context-transfer`.
-   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `context-transfer`.
+   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `transfer-context`.
+   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `transfer-context`.
 
 ## Security Model
 

@@ -9,14 +9,15 @@ Version: `v0.0.5`
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.5 | cross-agent, context-transfer |
+| [cross-agent](.) | 0.0.6 | cross-agent, transfer-context |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.5 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.4 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.6 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.5 |
+| [context-transfer](skills/context-transfer/SKILL.md) | - | - | Migration notice for the renamed `transfer-context` skill. | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
 
 ## Overview
 
@@ -27,7 +28,7 @@ Version: `v0.0.5`
    Arguments inside the brackets belong to the assigned skill; outer `--auto` is invalid.
 3. Basic delegation has no workflow dependency. An installed owner adapter supplies
    optional domain rules, validates the result and performs domain intake.
-4. The separate [context-transfer skill](skills/context-transfer/SKILL.md) saves and resumes
+4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
 5. Since `v0.0.5` the root `plugin.json` is the only manifest. Checked on 2026-11-07
    with Claude Code 2.1.319, Codex 0.166.0, Antigravity 1.5.2: Codex and Antigravity

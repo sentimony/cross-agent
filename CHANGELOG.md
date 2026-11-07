@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.6 - 2026-11-07
+
+1. `transfer-context` 0.0.5: rename `context-transfer` to `transfer-context` and its scripts to
+   `scripts/transfer_context*.py`. Persisted names (store directory, `CONTEXT_TRANSFER_DIR`, the
+   resume marker) are unchanged.
+2. `context-transfer`: an unversioned migration notice in the new Renamed skills group of `skills.sh.json`.
+3. `cross-agent` 0.0.6: name `transfer-context` in the `INCOMPATIBLE_SESSION` and `TIMEOUT` guidance.
+
 ## 0.0.5 - 2026-11-07
 
 1. The root `plugin.json` is the only plugin manifest: it carries `skills` and the Codex

@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import context_transfer as ct
+import transfer_context as ct
 from ct_fixtures import make_draft, make_repo
 
 

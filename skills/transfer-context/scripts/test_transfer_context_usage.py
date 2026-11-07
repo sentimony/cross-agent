@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 
-import context_transfer as ct
+import transfer_context as ct
 
 
 class UsageTest(unittest.TestCase):
