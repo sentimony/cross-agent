@@ -38,7 +38,8 @@ context.
 
 When the host classifies the assignment as `skill`, the first word inside the brackets is
 the installed skill name and the rest is its arguments. A free-text brief without that
-name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`.
+name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`;
+the reason says that the first word in brackets is read as the name of an installed skill.
 
 Each agent group is `<family> [model] [effort]`. Canonical families are `codex`,
 `claude-code`, and `antigravity`; input aliases `claude`, `gemini`, and `agy` remain

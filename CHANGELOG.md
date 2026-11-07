@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.5 - 2026-11-07
+
+1. The root `plugin.json` is the only plugin manifest: it carries `skills` and the Codex
+   `interface` under `extensions.com.openai`; no hidden manifests remain. Claude Code,
+   Codex and Antigravity installed the plugin and invoked a skill from it (host-matrix-v2).
+2. `cross-agent` 0.0.5: document that `registry_path` is a directory holding
+   `registry.json` and `registry.lock` and that both roots are created with `mkdir -m 700`
+   (`20261104-1654`); the `BLOCKED` and `UNAVAILABLE` reasons show the bracketed
+   assignment form (`20261104-1532`).
+3. `context-transfer` 0.0.4: warn against pointing `--store` or `CONTEXT_TRANSFER_DIR` at
+   `/tmp` (`20261104-0624`).
+
 ## 0.0.4 - 2026-11-05
 
 1. `cross-agent` 0.0.4: accept bounded UTF-8 assignment files with exact content.

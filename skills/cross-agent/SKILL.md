@@ -2,7 +2,7 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.4"
+  version: "0.0.5"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
@@ -56,7 +56,9 @@ The host owns permissions, task classification, installed sources and session id
    ```
 
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry
-   and artifact roots. `--task new` separates a task; `--new` refreshes only its session.
+   and artifact roots (directories created with `mkdir -m 700`, see
+   [protocol.md](references/protocol.md)). `--task new` separates a task; `--new`
+   refreshes only its session.
    Explicit `--session` has exactly one recipient. Incompatible identities block resume.
    Write each launched run's registry `session_id` (and `cli_session_id` when known), the
    role and the status into the host's own journal at launch, not afterwards: resuming a
