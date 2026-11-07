@@ -4,7 +4,7 @@
   "groupings": [
     {
       "title": "Skills",
-      "description": "Cross-agent delegation (cross-agent) and checkpoints for resuming work across sessions (transfer-context).",
+      "description": "Cross Agent CLI Delegation (cross-agent). Checkpoints for resuming work across sessions (transfer-context).",
       "skills": [
         "cross-agent",
         "transfer-context"
