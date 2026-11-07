@@ -74,7 +74,8 @@ def _resource(base, relative):
 def load_skill_context(name, installed):
     value = installed.get(name) if isinstance(installed, dict) else None
     if not isinstance(value, dict):
-        raise ProtocolError('Explicit skill unavailable in trusted installed scope: ' + name)
+        raise ProtocolError('Explicit skill unavailable in trusted installed scope: ' + name
+                            + ' (the first word in brackets is read as the name of an installed skill)')
     if not isinstance(value.get('base'), str) or not isinstance(value.get('origin'), str):
         raise ProtocolError('Installed skill needs origin and absolute base')
     base = Path(value['base'])

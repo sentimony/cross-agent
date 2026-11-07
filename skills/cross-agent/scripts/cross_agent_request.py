@@ -105,10 +105,10 @@ def parse_request(text: str, assignment_file_text: str = None) -> Request:
     if assignment_file_text is not None and start is not None:
         raise ValueError('assignment file conflicts with bracket assignment')
     if depth or (start is not None and end is None):
-        raise ValueError('one closed assignment required')
+        raise ValueError("one closed assignment required: use '<agent> <model> <effort> [<skill> <brief>]'")
     if assignment_file_text is None:
         if start is None:
-            raise ValueError('one closed assignment required')
+            raise ValueError("one closed assignment required: use '<agent> <model> <effort> [<skill> <brief>]'")
         assignment = text[start + 1:end]
         outer = text[:start] + ' ' + text[end + 1:]
     else:

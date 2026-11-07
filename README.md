@@ -3,20 +3,20 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.4`
+Version: `v0.0.5`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.4 | cross-agent, context-transfer |
+| [cross-agent](.) | 0.0.5 | cross-agent, context-transfer |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.4 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.3 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.5 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [context-transfer](skills/context-transfer/SKILL.md) | 0.0.4 | `/context-transfer` | Save and resume work across agent sessions with a verifiable checkpoint. |
 
 ## Overview
 
@@ -29,10 +29,10 @@ Version: `v0.0.4`
    optional domain rules, validates the result and performs domain intake.
 4. The separate [context-transfer skill](skills/context-transfer/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
-5. Source is shared by all platform manifests under `skills/cross-agent/`.
-   Native installation/invocation, live profiles and supporting resource loading have
-   not been verified for Codex, Claude Code or Antigravity. No compatibility promise
-   follows from the presence of metadata.
+5. Since `v0.0.5` the root `plugin.json` is the only manifest. Checked on 2026-11-07
+   with Claude Code 2.1.319, Codex 0.166.0, Antigravity 1.5.2: Codex and Antigravity
+   read it; Claude Code installs the plugin from the standard layout and the marketplace
+   entry. Installation and skill invocation both passed on all three hosts.
 
 ## Install
 
@@ -69,11 +69,12 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 
 | Evidence | Local state |
 | --- | --- |
-| Plugin / skill versions | Independent manifests and skill metadata, versioned independently |
+| Plugin / skill versions | Root `plugin.json` and skill metadata, versioned independently |
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |
-| Native host installation / provider resume / release pair | Unverified; separate approval and evidence required |
+| Native host installation and skill invocation | Checked on 2026-11-07: Claude Code install PASS, invocation PASS; Codex install PASS, invocation PASS; Antigravity install PASS, invocation PASS |
+| Provider resume / release pair | Unverified; separate approval and evidence required |
 
 The delegation runtime creates no remote repositories, installs, logins or releases.
 Live provider calls require explicit current authority.

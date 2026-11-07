@@ -12,7 +12,13 @@
    Hosts should put `registry_path` and `artifact_root` under
    `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
    which a reboot clears; nothing then lands in the project tree. The launcher does not
-   choose or check these paths.
+   choose these paths. Both are directories: `registry_path` holds `registry.json` and
+   `registry.lock`, and `artifact_root` holds one folder per run. Create both with
+   `mkdir -m 700` (the parents must already exist). The launcher answers
+   `UNSAFE_REGISTRY_PATH` for a registry directory that another user owns or that group
+   or others can access, and `unsafe run root (mode 755, expected 700)` for an
+   `artifact_root` whose mode is not exactly 700. Keep the parent directories under
+   `~/.sentimony` closed to group and others too; the launcher does not check their mode.
    Minimal read-only consultation host JSON (`policy`, `answer` and `owner_context` are
    omitted; `host_family` is the host's own family, `claude-code` or `codex`):
 

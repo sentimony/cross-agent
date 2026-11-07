@@ -3,7 +3,7 @@ name: context-transfer
 description: Save and resume work across agent sessions with a verifiable checkpoint.
 argument-hint: "[save | resume [<path|id>] | check | list | validate <path> | prune --keep <n>]"
 metadata:
-  version: "0.0.3"
+  version: "0.0.4"
 license: MIT
 compatibility: Python 3.9+
 ---

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.5 - 2026-11-07
+
+1. Document that `registry_path` names a directory holding `registry.json` and
+   `registry.lock`, and that the registry and artifact roots are created with
+   `mkdir -m 700` (`20261104-1654`, text part).
+2. The `BLOCKED` and `UNAVAILABLE` reasons show the bracketed assignment form and say that the
+   first word in brackets is read as an installed skill name (`20261104-1532`, text part).
+
 ## 0.0.4 - 2026-11-05
 
 1. Accept bounded UTF-8 assignment files without changing brackets or line endings.
