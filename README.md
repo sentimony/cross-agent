@@ -29,10 +29,10 @@ Version: `v0.0.7`
    optional domain rules, validates the result and performs domain intake.
 4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
-5. Since `v0.0.5` the root `plugin.json` is the only manifest. Checked on 2026-11-07
-   with Claude Code 2.1.319, Codex 0.166.0, Antigravity 1.5.2: Codex and Antigravity
-   read it; Claude Code installs the plugin from the standard layout and the marketplace
-   entry. Installation and skill invocation both passed on all three hosts.
+5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
+   `.antigravity-plugin/`), because Claude Code does not install a root `plugin.json`
+   as a plugin. Checked on 2026-11-07 with Claude Code 2.1.319, Codex 0.166.0,
+   Antigravity 1.5.2: installation and skill invocation passed on all three hosts.
 
 ## Install
 
@@ -69,7 +69,7 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 
 | Evidence | Local state |
 | --- | --- |
-| Plugin / skill versions | Root `plugin.json` and skill metadata, versioned independently |
+| Plugin / skill versions | Platform manifests and skill metadata, versioned independently |
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |

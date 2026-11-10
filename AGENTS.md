@@ -2,9 +2,9 @@
 
 1. This repository is the standalone `cross-agent` plugin. Keep two skill sources under
    `skills/cross-agent/` and `skills/transfer-context/`, each with its own
-   `metadata.version`, `CHANGELOG.md`, and `LICENSE`; root `plugin.json` is canonical. Claude Code and Antigravity
-   manifests must share its identity and version. Add a Codex compatibility manifest
-   only after the relevant host matrix is actually verified.
+   `metadata.version`, `CHANGELOG.md`, and `LICENSE`. The version lives in three manifests
+   (`.claude-plugin/`, `.codex-plugin/`, `.antigravity-plugin/`, each `plugin.json`);
+   they must share `name` and `version`. There is no root `plugin.json`.
 2. Keep generic transport, parsing, state and protocol independent of workflow policy.
    Installed owner adapters own their review contracts, target recipes and intake.
    Never import a sibling plugin or derive an adapter path from child output.
