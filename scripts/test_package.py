@@ -19,9 +19,13 @@ class PackageTests(unittest.TestCase):
                 self.assertFalse((ROOT/name).exists(),name)
         self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent', 'transfer-context'])
         groups=json.loads((ROOT/'skills.sh.json').read_text())['groupings']
-        renamed=[s for g in groups if g.get('title')=='Renamed skills' for s in g['skills']]
+        self.assertEqual([g['title'] for g in groups].count('Renamed skills'),1)
+        self.assertEqual(groups[-1]['title'],'Renamed skills')
+        renamed=groups[-1]['skills']
         self.assertEqual(renamed,['context-transfer'])
+        listed=[s for g in groups[:-1] for s in g['skills']]
         for name in renamed:
+            self.assertNotIn(name,listed)
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
         for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.5')):
