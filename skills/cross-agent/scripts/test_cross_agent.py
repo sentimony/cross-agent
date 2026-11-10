@@ -123,6 +123,32 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
                 self.assertEqual(document['status'], 'BLOCKED', result.stdout)
                 self.assertIn('required_roots', document['reason'])
 
+    def test_label_is_stored_and_shown_in_status_rows(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        base = self.cli_base()
+        run = subprocess.run(base + ['--label', 'wd', '--assignment-file', str(assignment), 'codex'],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        status = subprocess.run(base + ['--status'], capture_output=True, text=True)
+        self.assertEqual([row['label'] for row in json.loads(status.stdout)['sessions']], ['wd'])
+
+    def test_invalid_label_blocks_before_any_launch(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        for bad in ('a\nb', 'x' * 41, ''):
+            with self.subTest(bad=bad):
+                result = subprocess.run(self.cli_base() + ['--label', bad, '--assignment-file',
+                                                           str(assignment), 'codex'],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                document = json.loads(result.stdout)
+                self.assertEqual(document['status'], 'BLOCKED')
+                self.assertIn('--label', document['reason'])
+                self.assertFalse((self.root / 'registry').exists())
+
     def test_temp_warnings_unit(self):
         import cross_agent as ca
         roots = (Path('/scratch-tmp'),)

@@ -87,3 +87,23 @@
    Follow-up generic consultation can use a compatible reviewer session without owner policy.
 9. Adapter stderr/invalid response is a failure, not executable content. Native metadata,
    adapter authenticity and external service behavior require separate evidence.
+
+## Status rows
+
+`--status` prints `{"schema_version": 1, "sessions": [...]}` without writing the registry:
+one row per session of the repository, newest run first. Each row has these fields; a
+field that does not apply is `null`.
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | Registry session ID. |
+| `task` | Canonical issue, else the task ID. |
+| `family`, `model`, `effort` | The session's agent identity. |
+| `cli_session_id` | Provider session ID, bound or observed. |
+| `launch_cli_session_id` | ID the launcher gave a running fresh Claude Code run. |
+| `state` | Session state: `idle`, `running`, `completed`, `failed` or `blocked`. |
+| `label` | The latest run's `--label` text. |
+| `pid`, `alive` | Latest run's launcher PID; `alive` is checked only while the run is `running`. |
+| `started_at`, `elapsed_seconds` | Start time and duration (until `finished_at` once finished). |
+| `last_text`, `last_tool`, `last_at` | Last main-thread message, tool call and time (Claude Code). |
+| `estimate` | Token and cost estimate from the transcripts (Claude Code), not billing data. |

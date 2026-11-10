@@ -85,21 +85,22 @@ The host owns permissions, task classification, installed sources and session id
    after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
    the cumulative figures as the session total and the baseline for later runs. An
    adopted Codex session keeps measured rounds, but its session total stays incomplete.
-   `--status` reads the registry without writing it and prints the repository's sessions:
-   state, PID, elapsed time (until `finished_at` for a finished run) and, for Claude
-   Code, the last main-thread message and tool call from its transcript. A fresh Claude
-   Code run records the `--session-id` it was launched with as `launch_cli_session_id` on
-   the run, so `--status` reads its transcript while it runs; that ID is never a
-   resumable or owning binding. Transcripts are found through the child environment:
-   `CLAUDE_CONFIG_DIR`, else its `HOME`/.claude. A Claude Code row also has `estimate`:
-   tokens and cost summed from the main and subagent transcripts (see [CLI
-   runtime](references/cli-runtime.md)). It is not billing data, covers the interactive
-   part before adoption too, and stays separate from the launcher's exact `usage.json`
-   figures. An orchestrator asks the owner through `USER_INPUT_REQUIRED`; a `BLOCKED`
-   result takes its reason from the first output line. A `CONSULTATION_REQUIRED` or
-   `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps its status with
-   `handoff_invalid: true`: read the question from `output` and answer the same session.
-   Codex resume needs the provider rollout ([CLI runtime](references/cli-runtime.md)).
+   `--label <text>` (at most 40 characters) tags a run, and `--status` reads the registry
+   without writing it and prints the repository's sessions: state, PID, elapsed time
+   (until `finished_at` for a finished run) and, for Claude Code, the last main-thread
+   message and tool call from its transcript. A fresh Claude Code run records the
+   `--session-id` it was launched with as `launch_cli_session_id` on the run, so
+   `--status` reads its transcript while it runs; that ID is never a resumable or owning
+   binding. Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`,
+   else its `HOME`/.claude. A Claude Code row also has `estimate`: tokens and cost summed
+   from the main and subagent transcripts (see [CLI runtime](references/cli-runtime.md)).
+   It is not billing data, covers the interactive part before adoption too, and stays
+   separate from the launcher's exact `usage.json` figures. An orchestrator asks the
+   owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes its reason from the
+   first output line. A `CONSULTATION_REQUIRED` or `USER_INPUT_REQUIRED` result whose
+   `handoff` is malformed keeps its status with `handoff_invalid: true`: read the
+   question from `output` and answer the same session. Codex resume needs the provider
+   rollout ([CLI runtime](references/cli-runtime.md)).
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.

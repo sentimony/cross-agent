@@ -48,6 +48,7 @@ class HostContext:
     skill_context: object = None
     prior_dispositions: object = None
     required_roots: tuple = ()
+    label: object = None
 
 
 @dataclass
@@ -522,7 +523,7 @@ def dispatch(request, host_context):
             # Only Claude Code takes the launcher's ID; recording it lets --status
             # read the transcript of a fresh run before the provider confirms it.
             launch_id = cli_id if not resume and agent.family == 'claude-code' else None
-            run_id = reserve_session(host.task_context, decision, str(run), launch_id)
+            run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
@@ -826,7 +827,7 @@ def status(host, config_dir=None):
                or session['task_id'], 'family': session['family'], 'model': session['model'],
                'effort': session['effort'], 'cli_session_id': cli,
                'launch_cli_session_id': launch, 'state': session['status'],
-               'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
+               'label': run.get('label'), 'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
                'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
         if session['family'] == 'claude-code' and (cli or launch):
@@ -864,6 +865,8 @@ def main(argv=None):
     parser.add_argument('--adopt-cli-session', metavar='UUID',
                         help='Bind this existing provider session to a registry session, print its ID and exit')
     parser.add_argument('--assignment-file', metavar='PATH', help='Read assignment as strict UTF-8')
+    parser.add_argument('--label', metavar='TEXT',
+                        help='Short label (at most 40 characters) stored on the run and shown by --status')
     parser.add_argument('--status', action='store_true',
                         help='Print the sessions of this repository with their last activity and exit')
     parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
@@ -887,6 +890,13 @@ def main(argv=None):
     raw['required_roots'] = tuple(roots)
     host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
                        task_context=task, **raw)
+    if args.label is not None:
+        try:
+            state_store.check_label(args.label)
+        except StateError as exc:
+            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+            return 2
+        host = replace(host, label=args.label)
     if args.status:
         print(json.dumps(status(host), ensure_ascii=False, indent=1))
         return 0

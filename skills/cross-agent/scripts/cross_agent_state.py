@@ -215,7 +215,7 @@ def _validate(data):
                 run_ids.add(run['run_id'])
                 running += run['status'] == 'running'
                 for name in ('cli_session_id', 'observed_cli_session_id', 'launch_cli_session_id',
-                             'actual_model', 'actual_effort', 'reason', 'result_path'):
+                             'actual_model', 'actual_effort', 'reason', 'result_path', 'label'):
                     if name in run and (not isinstance(run[name], str) or not run[name]):
                         raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
@@ -479,7 +479,15 @@ def _recover(session):
             raise StateError('SESSION_BUSY')
 
 
-def reserve_session(context, decision, artifact_path, launch_cli_session_id=None):
+def check_label(label):
+    """A run label is short text without control characters."""
+    if (not isinstance(label, str) or not label or len(label) > 40
+            or any(ord(char) < 32 or ord(char) == 127 for char in label)):
+        raise StateError('INVALID_LABEL: --label must be 1-40 characters without control characters')
+    return label
+
+
+def reserve_session(context, decision, artifact_path, launch_cli_session_id=None, label=None):
     """Return host run UUID; atomically reject another live owner.
 
     launch_cli_session_id is the provider session ID the launcher assigns to a fresh
@@ -490,6 +498,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
         raise StateError(decision.reason)
     if not isinstance(artifact_path, str) or not Path(artifact_path).is_absolute():
         raise StateError('INVALID_ARTIFACT_PATH')
+    if label is not None:
+        check_label(label)
     if launch_cli_session_id is not None:
         if decision.cli_session_id is not None:
             raise StateError('INVALID_UPDATE')
@@ -513,6 +523,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
                    artifact_path=artifact_path, started_at=time.time())
         if launch_cli_session_id is not None:
             run['launch_cli_session_id'] = launch_cli_session_id
+        if label is not None:
+            run['label'] = label
         session['runs'].append(run)
         session['status'] = 'running'
         return run_id
