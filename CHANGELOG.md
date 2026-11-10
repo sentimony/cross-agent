@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.7 - 2026-11-10
+
+1. `transfer-context` 0.0.6: add a migration guide from `context-transfer`.
+
 ## 0.0.6 - 2026-11-07
 
 1. `transfer-context` 0.0.5: rename `context-transfer` to `transfer-context` and its scripts to
