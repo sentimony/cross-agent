@@ -31,8 +31,9 @@ Version: `v0.0.7`
    work across sessions with a verifiable checkpoint.
 5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
    `.antigravity-plugin/`), because Claude Code does not install a root `plugin.json`
-   as a plugin. Checked on 2026-11-07 with Claude Code 2.1.319, Codex 0.166.0,
-   Antigravity 1.5.2: installation and skill invocation passed on all three hosts.
+   as a plugin. The 2026-11-07 host checks (Claude Code 2.1.319, Codex 0.166.0,
+   Antigravity 1.5.2) covered the previous root-manifest layout; host install checks of
+   the three-manifest layout are still pending and run at the PR stage.
 
 ## Install
 
@@ -73,7 +74,7 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |
-| Native host installation and skill invocation | Checked on 2026-11-07: Claude Code install PASS, invocation PASS; Codex install PASS, invocation PASS; Antigravity install PASS, invocation PASS |
+| Native host installation and skill invocation | History, previous root-manifest layout (2026-11-07); three-manifest layout pending: Claude Code install PASS, invocation PASS; Codex install PASS, invocation PASS; Antigravity install PASS, invocation PASS |
 | Provider resume / release pair | Unverified; separate approval and evidence required |
 
 The delegation runtime creates no remote repositories, installs, logins or releases.
