@@ -17,7 +17,7 @@ import uuid
 import cross_agent_state as state_store
 import cli_transport as transport
 from cross_agent_protocol import (ProtocolError, validate_binding, load_skill_context, adapter_call, prepare_stop)
-from cross_agent_request import AgentGroup, FAMILIES, load_config, parse_request, resolve_agents, UnavailableError
+from cross_agent_request import AgentGroup, FAMILIES, FORM_HINT, load_config, parse_request, resolve_agents, UnavailableError
 from cross_agent_state import TaskContext, select_session, reserve_session, update_session, finish_session, StateError
 
 STATUSES = frozenset(('COMPLETED', 'CONSULTATION_REQUIRED', 'USER_INPUT_REQUIRED',
@@ -850,7 +850,9 @@ def main(argv=None):
         print(json.dumps(status(host), ensure_ascii=False, indent=1))
         return 0
     if args.request is None:
-        parser.error('request is required')
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
+                          'reason': 'request is required: ' + FORM_HINT}))
+        return 2
     try:
         assignment = None
         if args.assignment_file is not None:

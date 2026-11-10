@@ -68,6 +68,15 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         return [sys.executable, str(Path(__file__).with_name('cross_agent.py')),
                 '--host-context', str(host), '--config', str(config)]
 
+    def test_adopt_without_request_is_blocked_with_form(self):
+        import subprocess
+        result = subprocess.run(self.cli_base() + ['--adopt-cli-session', '12345678-1234-1234-1234-123456789abc'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertEqual(document['status'], 'BLOCKED')
+        self.assertIn("use '<agent> <model> <effort>", document['reason'])
+
     def test_assignment_file_reaches_fake_cli_exactly(self):
         import subprocess
         brief = 'Unmatched [ and ] ]\r\n- [ ] café \\ path\r\n'

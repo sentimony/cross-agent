@@ -72,7 +72,8 @@ The host owns permissions, task classification, installed sources and session id
    Write each launched run's registry `session_id` (and `cli_session_id` when known), the
    role and the status into the host's own journal at launch, not afterwards: resuming a
    session later needs the ID, and `--status` lists every session of the repository.
-   `--adopt-cli-session <uuid>` binds a provider session started outside the launcher
+   `--adopt-cli-session <uuid>` needs the bracket request (`'claude opus low [<skill> <brief>]'`)
+   too; without one it answers `BLOCKED` with the expected form. It binds a provider session started outside the launcher
    (for example an interactive Claude Code session) and prints its registry session ID;
    a Claude Code session must exist in the workspace's project, or adoption is refused.
    The same provider ID under another agent or canonical issue is refused. The first run

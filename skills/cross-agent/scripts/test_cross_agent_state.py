@@ -236,6 +236,17 @@ print(reserve_session(c,d,'/crashed/artifacts'))
             with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
                 self.choose()
 
+    def test_unsafe_modes_name_path_and_mode(self):
+        self.choose()
+        directory = Path(self.ctx.registry_path)
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(StateError, r'UNSAFE_REGISTRY_PATH: registry_path .+ mode 755, expected 700'):
+            self.choose()
+        directory.chmod(0o700)
+        (directory / 'registry.json').chmod(0o644)
+        with self.assertRaisesRegex(StateError, r'registry\.json mode 644, expected 600'):
+            self.choose()
+
     def test_atomic_write_failure_preserves_registry(self):
         from unittest.mock import patch
         self.choose()
