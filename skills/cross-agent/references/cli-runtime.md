@@ -69,7 +69,7 @@
    | Profile | Read workspace | Read outside workspace | Write | Network |
    | --- | --- | --- | --- | --- |
    | Codex `read-only` | not verified (`-s read-only`) | not verified | none by flag, not verified | not verified |
-   | Codex `execution` | verified (observed run, local tests) | not verified | workspace only, verified; `.git` denied, verified | none, verified (observed run) |
+   | Codex `execution` | verified (observed run, local tests) | not verified | workspace write and `.git` denied, verified (observed run, `CHANGELOG.md`); write outside workspace not verified | none, verified (observed run) |
    | Claude Code `read-only` | not verified (`Read,Grep,Glob` only) | refused before launch for `required_roots`, verified by test; CLI boundary not verified | no write tool by flag, not verified | no web or MCP tool by flag, not verified |
    | Claude Code `execution` | not verified | not verified | workspace tools by flag, not verified | web and MCP tools denied by flag, not verified |
 

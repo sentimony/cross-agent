@@ -474,7 +474,8 @@ def dispatch(request, host_context):
             if isinstance(agent, UnavailableError):
                 raise agent
             if agent.family == 'claude-code' and agent.profile == 'read-only':
-                # The restricted Claude child reads only its working directory.
+                # Conservative rule: refuse a declared root outside the workspace; the
+                # CLI's own read boundary is not verified.
                 workspace = Path(host.workspace).resolve()
                 for root in host.required_roots:
                     if not Path(root).resolve().is_relative_to(workspace):

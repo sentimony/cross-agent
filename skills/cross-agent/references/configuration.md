@@ -20,9 +20,10 @@ an assignment are ordinary data. Escape a literal unmatched bracket with a backs
 Outer tokens use `shlex.split` with no shell execution or variable expansion.
 
 The optional host JSON field `required_roots` is a list of absolute directory paths that
-the task must read. The launcher returns `UNAVAILABLE` with the reason `read-only profile
-cannot read: <root>` before starting a Claude Code read-only process when a root lies
-outside `workspace`, because that profile reads only its working directory; any other
+the task must read. The launcher returns `UNAVAILABLE` with the reason
+`read-only profile cannot read: <root>` before starting a Claude Code read-only process
+when a root lies outside `workspace`. This is a conservative launcher rule: the CLI's
+actual read boundary is not verified (see [cli-runtime.md](cli-runtime.md)). Any other
 value is rejected as `BLOCKED`. Omit the field for no check.
 
 For arbitrary UTF-8 text, use the launcher option `--assignment-file <path>` and
