@@ -75,6 +75,16 @@ def _text(value):
 
 
 def parse_request(text: str, assignment_file_text: str = None) -> Request:
+    """Parse a request; every ValueError ends with the expected request form."""
+    try:
+        return _parse_request(text, assignment_file_text)
+    except ValueError as exc:
+        if str(exc).endswith(FORM_HINT):
+            raise
+        raise ValueError(str(exc) + ': ' + FORM_HINT) from exc
+
+
+def _parse_request(text, assignment_file_text):
     """Extract exactly one balanced bracket envelope, preserving its interior bytes.
 
     Backslash escapes the next character for bracket counting only. Outer arguments

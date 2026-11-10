@@ -36,11 +36,12 @@ A bracket assignment and a file together are ambiguous and rejected; a request w
 either assignment is also rejected. Role and profile still come from the trusted host
 context.
 
-When the host classifies the assignment as `skill`, the first word inside the brackets is
-the installed skill name and the rest is its arguments. A free-text brief without that
-name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`;
-the reason says that the first word in brackets is read as the name of an installed skill
-and lists the installed skill names. Bracket syntax errors end with the expected form,
+When the host classifies the assignment as `skill` (its `assignment_kind`, not the
+request form, decides this), the first word of the assignment is the installed skill name
+and the rest is its arguments, whether the assignment came from the brackets or from
+`--assignment-file`. A free-text brief without that name is read as a skill name and
+returns `UNAVAILABLE: Explicit skill unavailable`; the reason says that the first word of
+the assignment is read as the name of an installed skill and lists the installed skill names. Request parse errors end with the expected form,
 `use '<agent> <model> <effort> [<skill> <brief>]'`.
 
 Each agent group is `<family> [model] [effort]`. Canonical families are `codex`,

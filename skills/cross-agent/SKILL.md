@@ -48,16 +48,19 @@ The host owns permissions, task classification, installed sources and session id
      [--config <agents-json>] 'claude opus low [assignment]'
    ```
 
-   To run an installed skill, put its name first in the brackets, then its brief:
+   When the host sets `assignment_kind: "skill"`, the first word of the assignment is the
+   installed skill name and the rest is its brief:
 
    ```text
    python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
-     'claude opus low [<skill> $(cat brief.txt)]'
+     "claude opus low [<skill> $(cat brief.txt)]"
    ```
 
-   A brief with literal brackets, or one that does not start with an installed skill
-   name, goes through `--assignment-file` instead of the brackets. For a file containing
-   the full UTF-8 brief, pass selectors separately:
+   Double quotes let the shell expand `$(...)`; command substitution drops trailing
+   newlines, so for exact content use `--assignment-file`. The same applies to a brief with
+   literal brackets. The file only replaces the brackets as the source of the assignment;
+   `assignment_kind` still decides whether its first word is a skill name. For a file
+   containing the full UTF-8 brief, pass selectors separately:
 
    ```text
    python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
@@ -72,9 +75,9 @@ The host owns permissions, task classification, installed sources and session id
    Write each launched run's registry `session_id` (and `cli_session_id` when known), the
    role and the status into the host's own journal at launch, not afterwards: resuming a
    session later needs the ID, and `--status` lists every session of the repository.
-   `--adopt-cli-session <uuid>` needs the bracket request (`'claude opus low [<skill> <brief>]'`)
-   too; without one it answers `BLOCKED` with the expected form. It binds a provider session started outside the launcher
-   (for example an interactive Claude Code session) and prints its registry session ID;
+   `--adopt-cli-session <uuid>` needs the bracket request
+   (`'claude opus low [<skill> <brief>]'`) too; without one it answers `BLOCKED` with the
+   expected form. It binds a provider session started outside the launcher (for example an interactive Claude Code session) and prints its registry session ID;
    a Claude Code session must exist in the workspace's project, or adoption is refused.
    The same provider ID under another agent or canonical issue is refused. The first run
    after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
