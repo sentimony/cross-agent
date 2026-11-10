@@ -108,6 +108,16 @@ class FactsTest(unittest.TestCase):
         self.assertIn('temporary directory', ct._store_warning(Path('/scratch-tmp/s'), roots))
         self.assertIsNone(ct._store_warning(Path('/home/u/s'), roots))
 
+    def test_store_warning_resolved_roots_and_normalized_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
+            (tmp / 'real').mkdir()
+            (tmp / 'link').symlink_to(tmp / 'real')
+            for spelling in ('link', 'real'):
+                with self.subTest(spelling=spelling):
+                    self.assertTrue(ct._store_warning(tmp / spelling / 's', (tmp / 'link',)))
+        self.assertIsNone(ct._store_warning(Path('/scratch-tmp/../home/u/s'), (Path('/scratch-tmp'),)))
+
     def test_facts_warn_about_temporary_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp)

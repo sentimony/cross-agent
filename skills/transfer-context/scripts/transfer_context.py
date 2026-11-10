@@ -200,11 +200,18 @@ def _temp_roots():
     return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
 
 
+def _under_temp(path, roots):
+    """True when the normalized or the symlink-resolved path is under a root as given or resolved."""
+    path = Path(os.path.normpath(path))
+    resolved = path.resolve()
+    candidates = tuple(roots) + tuple(root.resolve() for root in roots)
+    return any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in candidates)
+
+
 def _store_warning(store, roots):
     """Name a store under a temporary directory, which a reboot may clear."""
     store = Path(store)
-    resolved = store.resolve()
-    if any(store.is_relative_to(root) or resolved.is_relative_to(root) for root in roots):
+    if _under_temp(store, roots):
         return 'store under a temporary directory: %s; a reboot may clear it' % store
     return None
 

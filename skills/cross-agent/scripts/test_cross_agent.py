@@ -81,6 +81,37 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         none = {'artifact_root': Path('/home/u/a'), 'registry_path': Path('/home/u/r')}
         self.assertEqual(ca._temp_warnings(none, roots), [])
 
+    def test_temp_warnings_resolved_roots_and_normalized_paths(self):
+        import cross_agent as ca
+        real = self.root / 'real'
+        real.mkdir()
+        link = self.root / 'link'
+        link.symlink_to(real)
+        for spelling in (link, real):
+            with self.subTest(spelling=str(spelling)):
+                warnings = ca._temp_warnings({'artifact_root': spelling / 'a', 'registry_path': Path('/home/u/r')},
+                                             (link,))
+                self.assertEqual(len(warnings), 1, warnings)
+        roots = (Path('/scratch-tmp'),)
+        self.assertEqual(ca._temp_warnings({'artifact_root': Path('/scratch-tmp/../home/u/state')}, roots), [])
+
+    def test_blocked_dispatch_keeps_temp_warnings(self):
+        import subprocess
+        base = self.cli_base()
+        host = Path(base[base.index('--host-context') + 1])
+        document = json.loads(host.read_text())
+        document['timeout_seconds'] = 0
+        host.write_text(json.dumps(document))
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run(base + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertEqual(document['status'], 'BLOCKED')
+        self.assertIn('artifact_root under a temporary directory: ' + str(self.root / 'artifacts'),
+                      document['warnings'])
+
     def test_dispatch_result_warns_about_temporary_artifact_root(self):
         import subprocess
         assignment = self.root / 'assignment.txt'

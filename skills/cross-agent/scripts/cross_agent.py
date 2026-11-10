@@ -65,6 +65,14 @@ def _temp_roots():
     return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
 
 
+def _under_temp(path, roots):
+    """True when the normalized or the symlink-resolved path is under a root as given or resolved."""
+    path = Path(os.path.normpath(path))
+    resolved = path.resolve()
+    candidates = tuple(roots) + tuple(root.resolve() for root in roots)
+    return any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in candidates)
+
+
 def _temp_warnings(paths, roots):
     """Warn for each state path under a temporary directory, which a reboot may clear."""
     warnings = []
@@ -73,8 +81,7 @@ def _temp_warnings(paths, roots):
         if path is None:
             continue
         path = Path(path)
-        resolved = path.resolve()
-        if any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in roots):
+        if _under_temp(path, roots):
             warnings.append('%s under a temporary directory: %s' % (key, path))
     return warnings
 
@@ -894,7 +901,8 @@ def main(argv=None):
     try:
         result = dispatch(request, host)
     except (ValueError, transport.CrossReviewError) as exc:
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc),
+                          'warnings': warnings}))
         return 2
     result.warnings = warnings
     print(json.dumps(result.to_dict()))
