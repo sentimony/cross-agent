@@ -458,9 +458,21 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
 
     def test_invalid_labels_are_rejected_by_the_state_layer(self):
         from cross_agent_state import StateError
-        for bad in ('a\nb', 'x' * 41, '', 5):
+        for bad in ('a\nb', 'x' * 41, '', 5, 'a\u0085b', 'a\u009bb'):
             with self.subTest(bad=bad), self.assertRaises(StateError):
                 self.reserved_run(bad)
+
+    def test_stored_bad_label_is_rejected_when_the_registry_is_read(self):
+        from cross_agent import status
+        from cross_agent_state import StateError
+        self.reserved_run('wd')
+        path = Path(self.host.task_context.registry_path) / 'registry.json'
+        original = path.read_text()
+        for bad in ('a\u0085b', 'a\nb', 'x' * 41, ''):
+            with self.subTest(bad=bad):
+                path.write_text(original.replace('"label": "wd"', '"label": %s' % json.dumps(bad)))
+                with self.assertRaisesRegex(StateError, 'CORRUPT_REGISTRY'):
+                    status(self.host)
 
     def test_status_never_writes_the_registry(self):
         import os

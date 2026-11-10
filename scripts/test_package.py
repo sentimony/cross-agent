@@ -39,7 +39,7 @@ class PackageTests(unittest.TestCase):
             for link in re.findall(r'\]\((references/[^)]+)\)',text):
                 self.assertTrue((skill/link).is_file(),link)
     def test_runtime_imports_are_local_or_stdlib(self):
-        allowed = set('argparse ast base64 collections contextlib dataclasses datetime enum fcntl functools hashlib json math os pathlib pwd re shlex shutil signal stat subprocess sys tempfile threading time typing urllib uuid'.split())
+        allowed = set('argparse ast base64 collections contextlib dataclasses datetime enum fcntl functools hashlib json math os pathlib pwd re shlex shutil signal stat subprocess sys tempfile threading time typing unicodedata urllib uuid'.split())
         for name in ('cross-agent', 'transfer-context'):
             scripts = ROOT/'skills'/name/'scripts'
             local = {p.stem for p in scripts.glob('*.py') if not p.name.startswith('test_')}

@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from urllib.parse import quote
@@ -218,6 +219,8 @@ def _validate(data):
                              'actual_model', 'actual_effort', 'reason', 'result_path', 'label'):
                     if name in run and (not isinstance(run[name], str) or not run[name]):
                         raise ValueError()
+                if 'label' in run and not _label_ok(run['label']):
+                    raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
                     raise ValueError()
             if running > 1 or (running == 1) != (session['status'] == 'running'):
@@ -479,10 +482,14 @@ def _recover(session):
             raise StateError('SESSION_BUSY')
 
 
+def _label_ok(label):
+    return (isinstance(label, str) and 0 < len(label) <= 40
+            and not any(unicodedata.category(char) == 'Cc' for char in label))
+
+
 def check_label(label):
-    """A run label is short text without control characters."""
-    if (not isinstance(label, str) or not label or len(label) > 40
-            or any(ord(char) < 32 or ord(char) == 127 for char in label)):
+    """A run label is short text without control characters (any Unicode Cc)."""
+    if not _label_ok(label):
         raise StateError('INVALID_LABEL: --label must be 1-40 characters without control characters')
     return label
 
