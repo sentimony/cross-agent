@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -54,9 +55,28 @@ class DispatchResult:
     task_id: object = None
     target_identity: dict = field(default_factory=dict)
     results: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
+
+
+def _temp_roots():
+    return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
+
+
+def _temp_warnings(paths, roots):
+    """Warn for each state path under a temporary directory, which a reboot may clear."""
+    warnings = []
+    for key in ('artifact_root', 'registry_path'):
+        path = paths.get(key)
+        if path is None:
+            continue
+        path = Path(path)
+        resolved = path.resolve()
+        if any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in roots):
+            warnings.append('%s under a temporary directory: %s' % (key, path))
+    return warnings
 
 
 def _write(path, value):
@@ -869,11 +889,14 @@ def main(argv=None):
             return 2
         print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
         return 0
+    warnings = _temp_warnings({'artifact_root': host.artifact_root,
+                               'registry_path': task.registry_path}, _temp_roots())
     try:
         result = dispatch(request, host)
     except (ValueError, transport.CrossReviewError) as exc:
         print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
         return 2
+    result.warnings = warnings
     print(json.dumps(result.to_dict()))
     return 0 if all(r['status'] == 'COMPLETED' for r in result.results) else 1
 

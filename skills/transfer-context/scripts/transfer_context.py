@@ -196,6 +196,19 @@ def resolve_store(args):
     return store
 
 
+def _temp_roots():
+    return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
+
+
+def _store_warning(store, roots):
+    """Name a store under a temporary directory, which a reboot may clear."""
+    store = Path(store)
+    resolved = store.resolve()
+    if any(store.is_relative_to(root) or resolved.is_relative_to(root) for root in roots):
+        return 'store under a temporary directory: %s; a reboot may clear it' % store
+    return None
+
+
 def store_report(store, args):
     """Name the store kind so a legacy store is never used silently."""
     if getattr(args, 'store', None) or os.environ.get('CONTEXT_TRANSFER_DIR'):
@@ -861,6 +874,7 @@ def main(argv=None):
         facts = collect_facts(args.repo, getattr(args, 'host_context', None))
         facts['context'] = usage
         facts['store'] = store_report(store, args)
+        facts['store_warning'] = _store_warning(store, _temp_roots())
         target = read_latest(store, facts['project']['worktree'])
         if target:
             facts['checkpoints'].append(str(store / (target + '.md')))

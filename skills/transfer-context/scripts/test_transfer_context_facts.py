@@ -103,6 +103,21 @@ class FactsTest(unittest.TestCase):
                                    capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(facts.stdout)['checkpoints'], [path])
 
+    def test_store_warning_unit(self):
+        roots = (Path('/scratch-tmp'),)
+        self.assertIn('temporary directory', ct._store_warning(Path('/scratch-tmp/s'), roots))
+        self.assertIsNone(ct._store_warning(Path('/home/u/s'), roots))
+
+    def test_facts_warn_about_temporary_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp)
+            store = Path(tempfile.gettempdir()) / ('ct-warn-' + hashlib.sha1(tmp.encode()).hexdigest()[:8])
+            self.addCleanup(lambda: store.exists() and __import__('shutil').rmtree(store))
+            facts = subprocess.run([sys.executable, ct.__file__, 'facts', '--repo', str(repo),
+                                    '--store', str(store), '--json'],
+                                   capture_output=True, text=True, check=True)
+            self.assertTrue(json.loads(facts.stdout)['store_warning'])
+
     def test_untracked_links_and_nested_repository(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp)

@@ -12,10 +12,13 @@
    `registry_path` and `artifact_root` under
    `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
    which a reboot clears; nothing then lands in the project tree. The launcher does not
-   choose these paths. Both are directories: `registry_path` holds `registry.json` and
-   `registry.lock`, and `artifact_root` holds one folder per run. Create both with
-   `mkdir -m 700` (the parents must already exist), for example
-   `mkdir -m 700 <registry_path>`. The launcher answers
+   choose these paths, but it adds `registry_path under a temporary directory: <path>` or
+   `artifact_root under a temporary directory: <path>` to the `warnings` list of the
+   dispatch result when one of them is under `/tmp`, `/private/tmp`, `/var/tmp` or the
+   system temporary directory; the status does not change. Both are directories:
+   `registry_path` holds `registry.json` and `registry.lock`, and `artifact_root` holds
+   one folder per run. Create both with `mkdir -m 700` (the parents must already exist),
+   for example `mkdir -m 700 <registry_path>`. The launcher answers
    `UNSAFE_REGISTRY_PATH: <label> <path> mode <mode>, expected 700` (or `600` for
    `registry.json` and `registry.lock`) for a registry directory or file that group or
    others can access: run `chmod 700 <dir>` for the directory, `chmod 600 <file>` for a

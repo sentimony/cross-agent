@@ -68,6 +68,31 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         return [sys.executable, str(Path(__file__).with_name('cross_agent.py')),
                 '--host-context', str(host), '--config', str(config)]
 
+    def test_temp_warnings_unit(self):
+        import cross_agent as ca
+        roots = (Path('/scratch-tmp'),)
+        both = {'artifact_root': Path('/scratch-tmp/a'), 'registry_path': Path('/scratch-tmp/r')}
+        self.assertEqual(ca._temp_warnings(both, roots),
+                         ['artifact_root under a temporary directory: /scratch-tmp/a',
+                          'registry_path under a temporary directory: /scratch-tmp/r'])
+        one = {'artifact_root': Path('/scratch-tmp/a'), 'registry_path': Path('/home/u/r')}
+        self.assertEqual(ca._temp_warnings(one, roots),
+                         ['artifact_root under a temporary directory: /scratch-tmp/a'])
+        none = {'artifact_root': Path('/home/u/a'), 'registry_path': Path('/home/u/r')}
+        self.assertEqual(ca._temp_warnings(none, roots), [])
+
+    def test_dispatch_result_warns_about_temporary_artifact_root(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertNotEqual(document['results'][0]['status'], 'BLOCKED')
+        self.assertIn('artifact_root under a temporary directory: ' + str(self.root / 'artifacts'),
+                      document['warnings'])
+
     def test_adopt_without_request_is_blocked_with_form(self):
         import subprocess
         result = subprocess.run(self.cli_base() + ['--adopt-cli-session', '12345678-1234-1234-1234-123456789abc'],
