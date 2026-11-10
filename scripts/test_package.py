@@ -17,7 +17,12 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.6'))
             else:
                 self.assertFalse((ROOT/name).exists(),name)
-        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['context-transfer', 'cross-agent', 'transfer-context'])
+        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent', 'transfer-context'])
+        groups=json.loads((ROOT/'skills.sh.json').read_text())['groupings']
+        renamed=[s for g in groups if g.get('title')=='Renamed skills' for s in g['skills']]
+        self.assertEqual(renamed,['context-transfer'])
+        for name in renamed:
+            self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
         for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.5')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
