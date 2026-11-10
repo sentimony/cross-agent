@@ -30,8 +30,10 @@ Version: `v0.0.7`
 4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
 5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
-   `.antigravity-plugin/`), because Claude Code does not install a root `plugin.json`
-   as a plugin. The 2026-11-07 host checks (Claude Code 2.1.319, Codex 0.166.0,
+   `.antigravity-plugin/`). Claude Code 2.1.322 does accept a root `plugin.json`; the empty
+   plugin seen earlier came from the marketplace's `git-subdir` source with `path: "."`,
+   which installs only top-level files, and the marketplace will pin Claude Code entries
+   with a `url` source. The 2026-11-07 host checks (Claude Code 2.1.319, Codex 0.166.0,
    Antigravity 1.5.2) covered the previous root-manifest layout; host install checks of
    the three-manifest layout are still pending and run at the PR stage.
 
