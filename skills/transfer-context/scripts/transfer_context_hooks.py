@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from argparse import Namespace
 
-import context_transfer as ct
+import transfer_context as ct
 
 
 def session_start(payload, args, store):
@@ -20,8 +20,8 @@ def session_start(payload, args, store):
     created = datetime.datetime.fromisoformat(meta['created_at'].replace('Z', '+00:00'))
     age = max(0, int((datetime.datetime.now(datetime.timezone.utc) - created).total_seconds()))
     project = meta['project']
-    print('Context-transfer checkpoint: {}\nage: {} seconds\nbranch: {}\nHEAD: {}\n'
-          'Run /context-transfer resume to check the current state.'.format(
+    print('Transfer-context checkpoint: {}\nage: {} seconds\nbranch: {}\nHEAD: {}\n'
+          'Run /transfer-context resume to check the current state.'.format(
               path, age, project['branch'], project['head']))
 
 
@@ -46,7 +46,7 @@ def user_prompt_submit(payload, args, store):
     except FileExistsError:
         return
     os.close(fd)
-    message = 'Context-transfer level: {}. Use /context-transfer to save a checkpoint.'.format(level)
+    message = 'Transfer-context level: {}. Use /transfer-context to save a checkpoint.'.format(level)
     print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit',
                                               'additionalContext': message}}))
 

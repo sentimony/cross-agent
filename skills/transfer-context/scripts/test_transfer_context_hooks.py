@@ -8,10 +8,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import context_transfer as ct
+import transfer_context as ct
 from ct_fixtures import make_repo, make_draft
 
-HOOK = Path(__file__).with_name('context_transfer_hooks.py')
+HOOK = Path(__file__).with_name('transfer_context_hooks.py')
 
 
 class HookTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class HookTests(unittest.TestCase):
         meta, _ = ct.parse_checkpoint(path.read_text())
         output = self.invoke('session-start', payload)
         for value in (str(path), meta['project']['branch'], meta['project']['head'],
-                      '/context-transfer resume', 'age'):
+                      '/transfer-context resume', 'age'):
             self.assertIn(value, output)
         self.assertNotIn('SECRET BODY CONTENT', output)
 

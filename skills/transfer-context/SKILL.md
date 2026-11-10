@@ -1,18 +1,18 @@
 ---
-name: context-transfer
+name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint.
 argument-hint: "[save | resume [<path|id>] | check | list | validate <path> | prune --keep <n>]"
 metadata:
-  version: "0.0.4"
+  version: "0.0.5"
 license: MIT
 compatibility: Python 3.9+
 ---
 
-# Context Transfer
+# Transfer Context
 
 Save the current work for a later session, resume a checkpoint, or check context usage.
 The default command is `save`; also use `resume [<path|id>]` or `check`. Run
-`scripts/context_transfer.py` with Python 3.9 or newer. See [installation](references/install.md),
+`scripts/transfer_context.py` with Python 3.9 or newer. See [installation](references/install.md),
 [checkpoint format](references/checkpoint-format.md), and optional [hooks](references/hooks.md).
 
 ## Save
@@ -31,7 +31,7 @@ The default command is `save`; also use `resume [<path|id>]` or `check`. Run
    rerun tests for this step; mark results without fresh evidence `unverified`.
 4. Exclude secrets and private material, including secrets beyond the script's known
    patterns. Run `write <draft>` and report its checkpoint path, resume prompt and the
-   ready commands `/context-transfer resume <id>` (`$context-transfer resume <id>` for Codex). The
+   ready commands `/transfer-context resume <id>` (`$transfer-context resume <id>` for Codex). The
    script validates the draft, writes atomically and updates the latest pointer; a budget
    warning does not truncate the body. Save does not change project files, commit, discard
    changes or perform outward actions.

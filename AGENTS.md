@@ -1,7 +1,7 @@
 # AGENTS.md
 
 1. This repository is the standalone `cross-agent` plugin. Keep two skill sources under
-   `skills/cross-agent/` and `skills/context-transfer/`, each with its own
+   `skills/cross-agent/` and `skills/transfer-context/`, each with its own
    `metadata.version`, `CHANGELOG.md`, and `LICENSE`; root `plugin.json` is canonical. Claude Code and Antigravity
    manifests must share its identity and version. Add a Codex compatibility manifest
    only after the relevant host matrix is actually verified.

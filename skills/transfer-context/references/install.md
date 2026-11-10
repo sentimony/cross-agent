@@ -5,8 +5,8 @@ the project's skill directory. Replace the source with the absolute path to this
 
 ```sh
 mkdir -p .claude/skills .agents/skills
-ln -s /absolute/path/to/skills/context-transfer .claude/skills/context-transfer
-ln -s /absolute/path/to/skills/context-transfer .agents/skills/context-transfer
+ln -s /absolute/path/to/skills/transfer-context .claude/skills/transfer-context
+ln -s /absolute/path/to/skills/transfer-context .agents/skills/transfer-context
 ```
 
 Claude Code can use the optional [hook settings](hooks.md). Codex uses the skill manually;

@@ -1,4 +1,4 @@
-"""Collect local context and manage context-transfer checkpoints."""
+"""Collect local context and manage transfer-context checkpoints."""
 import argparse
 import datetime
 import shlex
@@ -834,8 +834,8 @@ def main(argv=None):
             store_line = store_report(path.parent, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
             resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
-            commands = '/context-transfer resume ' + path.stem
-            codex = '$context-transfer resume ' + path.stem
+            commands = '/transfer-context resume ' + path.stem
+            codex = '$transfer-context resume ' + path.stem
             if getattr(args, 'json', False):
                 print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
                                   'resume_command_codex': codex, 'store': store_line}))

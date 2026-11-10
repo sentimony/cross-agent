@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import context_transfer as ct
+import transfer_context as ct
 from ct_fixtures import git, make_draft, make_repo
 
 
