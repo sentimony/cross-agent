@@ -178,6 +178,30 @@ def _codex_turn_context(thread_id, env=None):
     return context
 
 
+def _codex_rate_limits(thread_id, env=None):
+    """Rate-limit snapshot of the last token_count event in the child's Codex rollout.
+
+    The snapshot is taken after the run; there is none before it, so no delta exists."""
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
+    root = Path(env.get('CODEX_HOME') or Path(home) / '.codex') / 'sessions'
+    limits = None
+    for path in sorted(root.glob('*/*/*/rollout-*-' + thread_id + '.jsonl')):
+        for line in path.read_text('utf-8', errors='replace').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            payload = event.get('payload') if isinstance(event, dict) else None
+            if (event.get('type') == 'event_msg' and isinstance(payload, dict)
+                    and payload.get('type') == 'token_count'
+                    and isinstance(payload.get('rate_limits'), dict)):
+                limits = payload['rate_limits']
+    return limits
+
+
 def _provider(family, run, requested_model=None, env=None):
     """Read only provider envelope fields, never identity in assistant content."""
     raw = (run / 'stdout.json').read_text('utf-8', errors='replace')
@@ -268,7 +292,8 @@ def _provider_ids(family, run):
     return ids
 
 
-def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False):
+def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False,
+           rate_limits=None):
     previous = transport._read_usage(previous_run) if previous_run is not None else None
     # Failed or mismatched identity evidence is not a cumulative accounting base,
     # even when its raw provider totals look complete.
@@ -288,6 +313,7 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no, ado
     usage['provider_reported'] = dict(reported,
         scope='session' if agent.family != 'codex' else 'round')
     usage['delta_reason'] = None
+    usage['rate_limits'] = rate_limits if agent.family == 'codex' else None
     if decision.resume and agent.family != 'codex':
         _, _, usage['delta_reason'] = transport.resume_usage(
             reported['tokens'], reported['cost_usd'], previous,
@@ -551,8 +577,10 @@ def dispatch(request, host_context):
             try:
                 text, observed, reported = _provider(agent.family, run, agent.model, child_env)
                 entry['observed_identity'] = observed
+                limits = (_codex_rate_limits(observed.get('cli_session_id'), child_env)
+                          if agent.family == 'codex' else None)
                 entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
-                                        round_no, adopted)
+                                        round_no, adopted, limits)
                 entry['artifacts']['usage'] = str(run / 'usage.json')
             except (OSError, ValueError, TypeError) as exc:
                 if entry['status'] == 'COMPLETED':

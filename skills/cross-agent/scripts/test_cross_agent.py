@@ -518,6 +518,38 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         self.assertEqual(first['session_id'], second['session_id'])
         self.assertEqual(first['cli_session_id'], second['cli_session_id'])
 
+    def codex_with_rollout(self, extra_line):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        self.assertEqual(text.count(old), 1)
+        rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
+                   "day.mkdir(parents=True,exist_ok=True)\n"
+                   "with open(day/('rollout-2026-11-03T00-00-00-'+sid+'.jsonl'),'a') as f:\n"
+                   " f.write(json.dumps({'type':'turn_context','payload':{'model':'gpt-6.1-sol','effort':'low'}})+'\\n')\n"
+                   + extra_line)
+        fixture.write_text(text.replace(old, rollout))
+
+    def test_codex_rate_limits_from_rollout_reach_usage_json(self):
+        limits = {'primary': {'used_percent': 31, 'window_minutes': 300, 'resets_at': 1794000000},
+                  'secondary': {'used_percent': 12, 'window_minutes': 10080, 'resets_at': 1794500000},
+                  'plan_type': 'plus'}
+        self.codex_with_rollout(
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':%r}})+'\\n')" % limits)
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        usage = json.loads(Path(entry['artifacts']['usage']).read_text())
+        self.assertEqual(usage['rate_limits']['primary']['used_percent'], 31)
+        self.assertEqual(usage['rate_limits'], limits)
+
+    def test_rollout_without_token_count_gives_null_rate_limits(self):
+        self.codex_with_rollout(" pass")
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        usage = json.loads(Path(entry['artifacts']['usage']).read_text())
+        self.assertIn('rate_limits', usage)
+        self.assertIsNone(usage['rate_limits'])
+
     def test_invalid_handoff_keeps_child_status_for_resume(self):
         fixture = self.bin / 'codex'
         text = fixture.read_text()

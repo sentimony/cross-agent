@@ -45,7 +45,10 @@
    child's rollout
    (`<CODEX_HOME or HOME/.codex>/sessions/*/*/*/rollout-*-<thread_id>.jsonl`) and records
    `model_basis: provider-rollout`. Without that file a Codex session stays non-resumable
-   and `--session`/resume returns `UNAVAILABLE`; use `--new`.
+   and `--session`/resume returns `UNAVAILABLE`; use `--new`. The same rollout's last
+   `token_count` event gives `rate_limits` (`primary`, `secondary`, `plan_type`) in the
+   run's `usage.json`; it is a snapshot after the run, `null` without such an event, and
+   there is no baseline, delta or warning threshold.
 4. `--status` estimates a Claude Code session's tokens and cost from its transcripts,
    without writing anything: the main `<projects>/<slug>/<id>.jsonl` and every
    `<id>/subagents/agent-*.jsonl`, read line by line. It sums `message.usage` of

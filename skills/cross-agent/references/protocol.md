@@ -43,18 +43,23 @@
    }
    ```
 
-   Add `assignment_kind: "skill"` and `installed_skills: {"<name>": {"origin": "<origin>",
-   "base": "<absolute skill dir>"}}` to run an installed skill. Execution profiles also
-   need `policy` (`family`, `repo`, `fresh_evidence`, `resume_evidence`, `local_actions`,
-   `delegation_blocked`, `config_isolated`; see [CLI runtime](cli-runtime.md)). When
-   evidence is empty, the launcher answers `UNAVAILABLE: execution needs verified scoped
-   host policy; missing_fields: ["fresh_evidence"]` (and `"resume_evidence"` for a resume).
-   `answer`
-   carries the host's reply to a prior `USER_INPUT_REQUIRED` handoff.
-3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient results.
-   Each run records host session/run IDs, provider ID, actual model/effort, role/profile,
-   operation, status, artifacts and usage. Registry schema1 remains compatible with the
-   embedded checkpoint; installation paths do not define task or provider identity.
+   Add `assignment_kind: "skill"` and
+   `installed_skills: {"<name>": {"origin": "<origin>", "base": "<absolute skill dir>"}}`
+   to run an installed skill. Execution profiles also need `policy` (`family`, `repo`,
+   `fresh_evidence`, `resume_evidence`, `local_actions`, `delegation_blocked`,
+   `config_isolated`; see [CLI runtime](cli-runtime.md)). When evidence is empty, the
+   launcher answers
+   `UNAVAILABLE: execution needs verified scoped host policy; missing_fields: ["fresh_evidence"]`
+   (and `"resume_evidence"` for a resume). `answer` carries the host's reply to a prior
+   `USER_INPUT_REQUIRED` handoff.
+3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient
+   results. Each run records host session/run IDs, provider ID, actual model/effort,
+   role/profile, operation, status, artifacts and usage. Registry schema1 remains
+   compatible with the embedded checkpoint; installation paths do not define task or
+   provider identity. A Codex run's `usage.json` also has `rate_limits`: the last rollout
+   `token_count` snapshot taken after the run (`primary`, `secondary`, `plan_type`), or
+   `null` without data and for other families. There is no snapshot before the run, so no
+   delta or warning threshold.
 4. `integration_required` or an installed skill's equivalent flag requires `integration`.
    This binding contains stable `owner_id`, `adapter_id`, integer `contract_version: 1`,
    `protocol_version: 1`, and `capabilities: ["prepare", "validate", "intake"]`.
