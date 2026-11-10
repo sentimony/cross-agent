@@ -542,6 +542,23 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         self.assertEqual(usage['rate_limits']['primary']['used_percent'], 31)
         self.assertEqual(usage['rate_limits'], limits)
 
+    def test_rate_limits_skip_non_object_rollout_lines(self):
+        limits = {'primary': {'used_percent': 5}}
+        self.codex_with_rollout(
+            " f.write('[]\\nnull\\n3\\n')\n"
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':%r}})+'\\n')" % limits)
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        self.assertEqual(json.loads(Path(entry['artifacts']['usage']).read_text())['rate_limits'], limits)
+
+    def test_last_token_count_without_rate_limits_resets_the_snapshot(self):
+        self.codex_with_rollout(
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':{'primary':{'used_percent':9}}}})+'\\n')\n"
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':None}})+'\\n')")
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        self.assertIsNone(json.loads(Path(entry['artifacts']['usage']).read_text())['rate_limits'])
+
     def test_rollout_without_token_count_gives_null_rate_limits(self):
         self.codex_with_rollout(" pass")
         entry = dispatch(parse_request('codex [read]'), self.host).results[0]

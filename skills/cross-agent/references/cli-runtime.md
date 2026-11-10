@@ -47,8 +47,9 @@
    `model_basis: provider-rollout`. Without that file a Codex session stays non-resumable
    and `--session`/resume returns `UNAVAILABLE`; use `--new`. The same rollout's last
    `token_count` event gives `rate_limits` (`primary`, `secondary`, `plan_type`) in the
-   run's `usage.json`; it is a snapshot after the run, `null` without such an event, and
-   there is no baseline, delta or warning threshold.
+   run's `usage.json`; it is a snapshot after the run, `null` when that last event
+   carries none or there is no such event, and there is no baseline, delta or warning
+   threshold.
 4. `--status` estimates a Claude Code session's tokens and cost from its transcripts,
    without writing anything: the main `<projects>/<slug>/<id>.jsonl` and every
    `<id>/subagents/agent-*.jsonl`, read line by line. It sums `message.usage` of
@@ -72,7 +73,7 @@
    | Profile | Read workspace | Read outside workspace | Write | Network |
    | --- | --- | --- | --- | --- |
    | Codex `read-only` | not verified (`-s read-only`) | not verified | none by flag, not verified | not verified |
-   | Codex `execution` | verified (observed run, local tests) | not verified | workspace write and `.git` denied, verified (observed run, `CHANGELOG.md`); write outside workspace not verified | none, verified (observed run) |
+   | Codex `execution` | not verified (`-s workspace-write`) | not verified | workspace write and `.git` denied, verified (observed run, `CHANGELOG.md`); write outside workspace not verified | not verified (`-s workspace-write`) |
    | Claude Code `read-only` | not verified (`Read,Grep,Glob` only) | refused before launch for `required_roots`, verified by test; CLI boundary not verified | no write tool by flag, not verified | no web or MCP tool by flag, not verified |
    | Claude Code `execution` | not verified | not verified | workspace tools by flag, not verified | web and MCP tools denied by flag, not verified |
 

@@ -179,7 +179,8 @@ def _codex_turn_context(thread_id, env=None):
 
 
 def _codex_rate_limits(thread_id, env=None):
-    """Rate-limit snapshot of the last token_count event in the child's Codex rollout.
+    """Rate-limit snapshot of the last token_count event in the child's Codex rollout, or None
+    when that event has none.
 
     The snapshot is taken after the run; there is none before it, so no delta exists."""
     if not isinstance(thread_id, str) or not thread_id:
@@ -194,11 +195,14 @@ def _codex_rate_limits(thread_id, env=None):
                 event = json.loads(line)
             except ValueError:
                 continue
-            payload = event.get('payload') if isinstance(event, dict) else None
+            if not isinstance(event, dict):
+                continue
+            payload = event.get('payload')
             if (event.get('type') == 'event_msg' and isinstance(payload, dict)
-                    and payload.get('type') == 'token_count'
-                    and isinstance(payload.get('rate_limits'), dict)):
-                limits = payload['rate_limits']
+                    and payload.get('type') == 'token_count'):
+                # Every token_count event replaces the snapshot, so a later one without
+                # rate limits (for example from a resumed run) leaves none.
+                limits = payload['rate_limits'] if isinstance(payload.get('rate_limits'), dict) else None
     return limits
 
 
