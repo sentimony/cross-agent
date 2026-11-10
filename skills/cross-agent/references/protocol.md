@@ -3,13 +3,13 @@
 1. Protocol and owner contract versions are integer `1`. Generic result statuses are
    `COMPLETED`, `CONSULTATION_REQUIRED`, `USER_INPUT_REQUIRED`, `BLOCKED`, `FAILED`,
    `UNAVAILABLE`, `CANCELLED`. Unknown provider identity and usage remain explicit.
-2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`, optional
-   active task IDs/canonical issue), `host_family`, `workspace`, `artifact_root`,
-   `target_identity`, trusted `assignment_kind`, `installed_skills`, `role`, `profile`,
-   optional timeout/policy/environment/`pass_env` (variable names kept in the child), answer and opaque `owner_context` object.
-   CLI configuration is a separate explicit
-   schema1 file; child text cannot supply host fields.
-   Hosts should put `registry_path` and `artifact_root` under
+2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`,
+   optional active task IDs/canonical issue), `host_family`, `workspace`,
+   `artifact_root`, `target_identity`, trusted `assignment_kind`, `installed_skills`,
+   `role`, `profile`, optional timeout/policy/environment/`pass_env` (variable names kept
+   in the child), answer and opaque `owner_context` object. CLI configuration is a
+   separate explicit schema1 file; child text cannot supply host fields. Hosts should put
+   `registry_path` and `artifact_root` under
    `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
    which a reboot clears; nothing then lands in the project tree. The launcher does not
    choose these paths. Both are directories: `registry_path` holds `registry.json` and
@@ -19,9 +19,9 @@
    `UNSAFE_REGISTRY_PATH: <label> <path> mode <mode>, expected 700` (or `600` for
    `registry.json` and `registry.lock`) for a registry directory or file that group or
    others can access: run `chmod 700 <dir>` for the directory, `chmod 600 <file>` for a
-   file. For `owner uid <n>, expected uid <m>` chmod does not help: the path must belong to
-   the current user, so fix its ownership or choose another registry root. The launcher
-   also answers `unsafe run root (mode 755, expected 700)` for an
+   file. For `owner uid <n>, expected uid <m>` chmod does not help: the path must belong
+   to the current user, so fix its ownership or choose another registry root. The
+   launcher also answers `unsafe run root (mode 755, expected 700)` for an
    `artifact_root` whose mode is not exactly 700. Keep the parent directories under
    `~/.sentimony` closed to group and others too; the launcher does not check their mode.
    Minimal read-only consultation host JSON (`policy`, `answer` and `owner_context` are
