@@ -65,22 +65,30 @@ None.
 ```
 
 By default the store is `~/.sentimony/cross-agent/context-transfer/<slug>/`, outside the
-project tree: nothing is added to the project, `.gitignore` or `.git/info/exclude`, and a
-checkpoint survives a reboot. For a Git repository the slug is built from the main checkout
-(the parent of the common Git directory), so every worktree shares one store and resumes
-from any of them; outside Git it is built from the working directory. A store with
-checkpoints there always wins. A legacy store is used only while it has none:
-`<git common dir>/context-transfer/`, then `docs/context-transfer/` of the main checkout. A bare or non-standard common directory
-uses its own slug.
+project tree: nothing is added to the project, `.gitignore` or `.git/info/exclude`,
+and a checkpoint survives a reboot. For a Git repository the slug is built from the
+main checkout (the parent of the common Git directory), so every worktree shares one
+store and resumes from any of them; outside Git it is built from the working
+directory. A store with checkpoints there always wins. A legacy store is used only
+while it has none: `<git common dir>/context-transfer/`, then `docs/context-transfer/`
+of the main checkout. A bare or non-standard common directory uses its own slug.
 `--store` overrides `CONTEXT_TRANSFER_DIR`, which overrides the default. Do not point
-either at an OS temporary directory such as `/tmp`: a reboot clears it and the checkpoints
-are lost. Each checkpoint is `<transfer_id>.md`; `latest-<worktree slug>` points to the
-latest one. A slug is the realpath basename (or `root` for `/`) cut to at most 64 bytes on
-a character boundary, followed by `-` and the first 12 hex digits of the SHA-256 digest of
-the filesystem-encoded realpath. Optional `config.json` holds thresholds and
+either at an OS temporary directory such as `/tmp`: a reboot clears it and the
+checkpoints are lost, and `facts --json` reports `store_warning` for a store under
+one. Keep it under `~/.sentimony/cross-agent/<skill>/<project>/`. Each checkpoint is
+`<transfer_id>.md`; `latest-<worktree slug>` points to the latest one. A slug is the
+realpath basename (or `root` for `/`) cut to at most 64 bytes on a character boundary,
+followed by `-` and the first 12 hex digits of the SHA-256 digest of the
+filesystem-encoded realpath. Optional `config.json` holds thresholds and
 `window_tokens`; hooks use `reminders/`.
 
-Run `validate <path>` to check a completed checkpoint. Missing artifacts are warnings
-on validation and errors on write. `--budget` sets the body character warning threshold
-(default 12000). The script rejects known secret patterns; review all material for other
-secrets before writing.
+`write --auto` accepts a draft with only `Objective`, `Decisions`, `Failed approaches`
+and `Pending user decisions` and fills the other sections from facts or `None recorded.`;
+`write` also prints `resume_command_terminal` and `resume_command_terminal_codex`
+(`cd <root> && claude '/transfer-context resume <id>'` and
+`codex '$transfer-context resume <id>'`, single-quoted so the shell leaves `$` alone).
+`list` prints the store's checkpoints, `prune --keep <n> [--all]` removes older ones and
+never runs implicitly. Run `validate <path>` to check a completed checkpoint. Missing
+artifacts are warnings on validation and errors on write. `--budget` sets the body
+character warning threshold (default 12000). The script rejects known secret patterns;
+review all material for other secrets before writing.

@@ -3,6 +3,18 @@
 ## 0.0.7 - 2026-11-10
 
 1. `transfer-context` 0.0.6: add a migration guide from `context-transfer`.
+2. Restore the three platform manifests (`.claude-plugin/`, `.codex-plugin/`,
+   `.antigravity-plugin/`) and remove the root `plugin.json`; `scripts/test_package.py`
+   checks that all three carry the same name and version. Claude Code 2.1.322 accepts a
+   root `plugin.json`: the empty plugin came from the marketplace's `git-subdir` source
+   with `path: "."`. Host install checks of the three-manifest layout run at the PR stage.
+3. `skills.sh.json`: the group description no longer uses code formatting.
+4. `cross-agent` 0.0.7: clearer request, registry-path and profile errors, temporary-path
+   warnings, `required_roots`, `--label` and `rate_limits` (requests `20261104-1532`,
+   `20261104-1654`, `20261104-0624`, `20261104-1631`, `20261104-1616`, `20261104-0010`,
+   `20261025-1722`).
+5. `transfer-context` 0.0.7: `store_warning`, `write --auto`, terminal resume commands and a
+   lighter `SKILL.md` (`20261104-0624`, `20261106-1735`).
 
 ## 0.0.6 - 2026-11-07
 

@@ -3,20 +3,28 @@
 1. Protocol and owner contract versions are integer `1`. Generic result statuses are
    `COMPLETED`, `CONSULTATION_REQUIRED`, `USER_INPUT_REQUIRED`, `BLOCKED`, `FAILED`,
    `UNAVAILABLE`, `CANCELLED`. Unknown provider identity and usage remain explicit.
-2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`, optional
-   active task IDs/canonical issue), `host_family`, `workspace`, `artifact_root`,
-   `target_identity`, trusted `assignment_kind`, `installed_skills`, `role`, `profile`,
-   optional timeout/policy/environment/`pass_env` (variable names kept in the child), answer and opaque `owner_context` object.
-   CLI configuration is a separate explicit
-   schema1 file; child text cannot supply host fields.
-   Hosts should put `registry_path` and `artifact_root` under
+2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`,
+   optional active task IDs/canonical issue), `host_family`, `workspace`,
+   `artifact_root`, `target_identity`, trusted `assignment_kind`, `installed_skills`,
+   `role`, `profile`, optional timeout/policy/environment/`pass_env` (variable names kept
+   in the child), answer and opaque `owner_context` object. CLI configuration is a
+   separate explicit schema1 file; child text cannot supply host fields. Hosts should put
+   `registry_path` and `artifact_root` under
    `~/.sentimony/cross-agent/cross-agent/<project>/`, not into an OS temporary directory,
    which a reboot clears; nothing then lands in the project tree. The launcher does not
-   choose these paths. Both are directories: `registry_path` holds `registry.json` and
-   `registry.lock`, and `artifact_root` holds one folder per run. Create both with
-   `mkdir -m 700` (the parents must already exist). The launcher answers
-   `UNSAFE_REGISTRY_PATH` for a registry directory that another user owns or that group
-   or others can access, and `unsafe run root (mode 755, expected 700)` for an
+   choose these paths, but it adds `registry_path under a temporary directory: <path>` or
+   `artifact_root under a temporary directory: <path>` to the `warnings` list of the
+   dispatch result when one of them is under `/tmp`, `/private/tmp`, `/var/tmp` or the
+   system temporary directory; the status does not change. Both are directories:
+   `registry_path` holds `registry.json` and `registry.lock`, and `artifact_root` holds
+   one folder per run. Create both with `mkdir -m 700` (the parents must already exist),
+   for example `mkdir -m 700 <registry_path>`. The launcher answers
+   `UNSAFE_REGISTRY_PATH: <label> <path> mode <mode>, expected 700` (or `600` for
+   `registry.json` and `registry.lock`) for a registry directory or file that group or
+   others can access: run `chmod 700 <dir>` for the directory, `chmod 600 <file>` for a
+   file. For `owner uid <n>, expected uid <m>` chmod does not help: the path must belong
+   to the current user, so fix its ownership or choose another registry root. The
+   launcher also answers `unsafe run root (mode 755, expected 700)` for an
    `artifact_root` whose mode is not exactly 700. Keep the parent directories under
    `~/.sentimony` closed to group and others too; the launcher does not check their mode.
    Minimal read-only consultation host JSON (`policy`, `answer` and `owner_context` are
@@ -35,15 +43,23 @@
    }
    ```
 
-   Add `assignment_kind: "skill"` and `installed_skills: {"<name>": {"origin": "<origin>",
-   "base": "<absolute skill dir>"}}` to run an installed skill. Execution profiles also
-   need `policy` (`family`, `repo`, `fresh_evidence`, `resume_evidence`, `local_actions`,
-   `delegation_blocked`, `config_isolated`; see [CLI runtime](cli-runtime.md)). `answer`
-   carries the host's reply to a prior `USER_INPUT_REQUIRED` handoff.
-3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient results.
-   Each run records host session/run IDs, provider ID, actual model/effort, role/profile,
-   operation, status, artifacts and usage. Registry schema1 remains compatible with the
-   embedded checkpoint; installation paths do not define task or provider identity.
+   Add `assignment_kind: "skill"` and
+   `installed_skills: {"<name>": {"origin": "<origin>", "base": "<absolute skill dir>"}}`
+   to run an installed skill. Execution profiles also need `policy` (`family`, `repo`,
+   `fresh_evidence`, `resume_evidence`, `local_actions`, `delegation_blocked`,
+   `config_isolated`; see [CLI runtime](cli-runtime.md)). When evidence is empty, the
+   launcher answers
+   `UNAVAILABLE: execution needs verified scoped host policy; missing_fields: ["fresh_evidence"]`
+   (and `"resume_evidence"` for a resume). `answer` carries the host's reply to a prior
+   `USER_INPUT_REQUIRED` handoff.
+3. Generic `DispatchResult` schema1 preserves task ID, target identity and recipient
+   results. Each run records host session/run IDs, provider ID, actual model/effort,
+   role/profile, operation, status, artifacts and usage. Registry schema1 remains
+   compatible with the embedded checkpoint; installation paths do not define task or
+   provider identity. A Codex run's `usage.json` also has `rate_limits`: the last rollout
+   `token_count` event's snapshot taken after the run (`primary`, `secondary`,
+   `plan_type`), or `null` when that event carries none, without data, and for other
+   families. There is no snapshot before the run, so no delta or warning threshold.
 4. `integration_required` or an installed skill's equivalent flag requires `integration`.
    This binding contains stable `owner_id`, `adapter_id`, integer `contract_version: 1`,
    `protocol_version: 1`, and `capabilities: ["prepare", "validate", "intake"]`.
@@ -76,3 +92,23 @@
    Follow-up generic consultation can use a compatible reviewer session without owner policy.
 9. Adapter stderr/invalid response is a failure, not executable content. Native metadata,
    adapter authenticity and external service behavior require separate evidence.
+
+## Status rows
+
+`--status` prints `{"schema_version": 1, "sessions": [...]}` without writing the registry:
+one row per session of the repository, newest run first. Each row has these fields; a
+field that does not apply is `null`.
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | Registry session ID. |
+| `task` | Canonical issue, else the task ID. |
+| `family`, `model`, `effort` | The session's agent identity. |
+| `cli_session_id` | Provider session ID, bound or observed. |
+| `launch_cli_session_id` | ID the launcher gave a running fresh Claude Code run. |
+| `state` | Session state: `idle`, `running`, `completed`, `failed` or `blocked`. |
+| `label` | The latest run's `--label` text. |
+| `pid`, `alive` | Latest run's launcher PID; `alive` is checked only while the run is `running`. |
+| `started_at`, `elapsed_seconds` | Start time and duration (until `finished_at` once finished). |
+| `last_text`, `last_tool`, `last_at` | Last main-thread message, tool call and time (Claude Code). |
+| `estimate` | Token and cost estimate from the transcripts (Claude Code), not billing data. |

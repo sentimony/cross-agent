@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from urllib.parse import quote
@@ -41,19 +42,24 @@ class StateError(ValueError):
     status = 'BLOCKED'
 
 
-def _private(st, directory=False):
-    expected = stat.S_ISDIR if directory else stat.S_ISREG
-    if not expected(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-        raise StateError('UNSAFE_REGISTRY_PATH')
-    if not directory and st.st_nlink != 1:
-        raise StateError('UNSAFE_REGISTRY_PATH')
+def _private(st, is_dir, path, label):
+    expected = stat.S_ISDIR if is_dir else stat.S_ISREG
+    where = 'UNSAFE_REGISTRY_PATH: %s %s' % (label, path)
+    if not expected(st.st_mode):
+        raise StateError(where + ' is not a ' + ('directory' if is_dir else 'regular file'))
+    if st.st_uid != os.getuid():
+        raise StateError(where + ' owner uid %d, expected uid %d' % (st.st_uid, os.getuid()))
+    if st.st_mode & 0o077:
+        raise StateError(where + ' mode %o, expected %s' % (st.st_mode & 0o777, '700' if is_dir else '600'))
+    if not is_dir and st.st_nlink != 1:
+        raise StateError(where + ' has %d hard links, expected 1' % st.st_nlink)
 
 
-def _open_private(directory, name, flags):
+def _open_private(directory, name, flags, base):
     try:
         fd = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=directory)
         try:
-            _private(os.fstat(fd))
+            _private(os.fstat(fd), False, base / name, 'registry file')
         except BaseException:
             os.close(fd)
             raise
@@ -210,9 +216,11 @@ def _validate(data):
                 run_ids.add(run['run_id'])
                 running += run['status'] == 'running'
                 for name in ('cli_session_id', 'observed_cli_session_id', 'launch_cli_session_id',
-                             'actual_model', 'actual_effort', 'reason', 'result_path'):
+                             'actual_model', 'actual_effort', 'reason', 'result_path', 'label'):
                     if name in run and (not isinstance(run[name], str) or not run[name]):
                         raise ValueError()
+                if 'label' in run and not _label_ok(run['label']):
+                    raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
                     raise ValueError()
             if running > 1 or (running == 1) != (session['status'] == 'running'):
@@ -239,7 +247,7 @@ def _registry_dir(context):
     return path
 
 
-def _open_snapshot(directory, attempts=3):
+def _open_snapshot(directory, base, attempts=3):
     """Open registry.json for the lock-free read. A writer's os.replace between open
     and fstat leaves the opened old inode with no links: reopen the current name.
     Several links and every other unsafe case are still refused."""
@@ -251,7 +259,7 @@ def _open_snapshot(directory, attempts=3):
         try:
             st = os.fstat(fd)
             if not (stat.S_ISREG(st.st_mode) and st.st_nlink == 0):
-                _private(st)
+                _private(st, False, base / 'registry.json', 'registry file')
                 return fd
         except BaseException:
             os.close(fd)
@@ -260,13 +268,13 @@ def _open_snapshot(directory, attempts=3):
     raise StateError('UNSAFE_REGISTRY_PATH')
 
 
-def _load(directory, snapshot=False):
+def _load(directory, base, snapshot=False):
     try:
         os.stat('registry.json', dir_fd=directory, follow_symlinks=False)
     except FileNotFoundError:
         return _empty()
-    fd = (_open_snapshot(directory) if snapshot
-          else _open_private(directory, 'registry.json', os.O_RDONLY))
+    fd = (_open_snapshot(directory, base) if snapshot
+          else _open_private(directory, 'registry.json', os.O_RDONLY, base))
     try:
         with os.fdopen(fd, 'r', encoding='utf-8') as stream:
             raw = stream.read(8 * 1024 * 1024 + 1)
@@ -292,8 +300,8 @@ def read_registry(context):
     except OSError as exc:
         raise StateError('UNSAFE_REGISTRY_PATH') from exc
     try:
-        _private(os.fstat(directory), True)
-        return _load(directory, snapshot=True)
+        _private(os.fstat(directory), True, path, 'registry_path')
+        return _load(directory, path, snapshot=True)
     finally:
         os.close(directory)
 
@@ -308,8 +316,8 @@ def _registry(context):
     directory = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     lock = None
     try:
-        _private(os.fstat(directory), True)
-        lock = _open_private(directory, 'registry.lock', os.O_RDWR | os.O_CREAT)
+        _private(os.fstat(directory), True, path, 'registry_path')
+        lock = _open_private(directory, 'registry.lock', os.O_RDWR | os.O_CREAT, path)
         deadline = time.monotonic() + 2
         while True:
             try:
@@ -319,11 +327,11 @@ def _registry(context):
                 if time.monotonic() >= deadline:
                     raise StateError('REGISTRY_BUSY')
                 time.sleep(0.01)
-        data = _load(directory)
+        data = _load(directory, path)
         yield data
         _validate(data)
         name = '.registry-' + str(uuid.uuid4())
-        fd = _open_private(directory, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        fd = _open_private(directory, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, path)
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 json.dump(data, stream, sort_keys=True)
@@ -474,7 +482,19 @@ def _recover(session):
             raise StateError('SESSION_BUSY')
 
 
-def reserve_session(context, decision, artifact_path, launch_cli_session_id=None):
+def _label_ok(label):
+    return (isinstance(label, str) and 0 < len(label) <= 40
+            and not any(unicodedata.category(char) == 'Cc' for char in label))
+
+
+def check_label(label):
+    """A run label is short text without control characters (any Unicode Cc)."""
+    if not _label_ok(label):
+        raise StateError('INVALID_LABEL: --label must be 1-40 characters without control characters')
+    return label
+
+
+def reserve_session(context, decision, artifact_path, launch_cli_session_id=None, label=None):
     """Return host run UUID; atomically reject another live owner.
 
     launch_cli_session_id is the provider session ID the launcher assigns to a fresh
@@ -485,6 +505,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
         raise StateError(decision.reason)
     if not isinstance(artifact_path, str) or not Path(artifact_path).is_absolute():
         raise StateError('INVALID_ARTIFACT_PATH')
+    if label is not None:
+        check_label(label)
     if launch_cli_session_id is not None:
         if decision.cli_session_id is not None:
             raise StateError('INVALID_UPDATE')
@@ -508,6 +530,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
                    artifact_path=artifact_path, started_at=time.time())
         if launch_cli_session_id is not None:
             run['launch_cli_session_id'] = launch_cli_session_id
+        if label is not None:
+            run['label'] = label
         session['runs'].append(run)
         session['status'] = 'running'
         return run_id

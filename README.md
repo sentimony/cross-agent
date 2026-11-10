@@ -15,8 +15,8 @@ Version: `v0.0.7`
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.6 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.6 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.7 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.7 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
 
 ## Overview
 
@@ -29,10 +29,15 @@ Version: `v0.0.7`
    optional domain rules, validates the result and performs domain intake.
 4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
-5. Since `v0.0.5` the root `plugin.json` is the only manifest. Checked on 2026-11-07
-   with Claude Code 2.1.319, Codex 0.166.0, Antigravity 1.5.2: Codex and Antigravity
-   read it; Claude Code installs the plugin from the standard layout and the marketplace
-   entry. Installation and skill invocation both passed on all three hosts.
+5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
+   `.antigravity-plugin/`). Claude Code 2.1.322 does accept a root `plugin.json`; the
+   empty plugin seen earlier came from the marketplace's `git-subdir` source with
+   `path: "."`, which installs only top-level files, and the marketplace will pin Claude
+   Code entries with a `url` source. The 2026-11-07 host checks (Claude Code 2.1.319,
+   Codex 0.166.0, Antigravity 1.5.2) covered the previous root-manifest layout. On
+   2026-11-10 the three-manifest layout installed from the branch with Claude Code
+   2.1.322 and Codex 0.167.0 (both skills at 0.0.7); invocation and Antigravity are not
+   checked.
 
 ## Install
 
@@ -69,11 +74,11 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 
 | Evidence | Local state |
 | --- | --- |
-| Plugin / skill versions | Root `plugin.json` and skill metadata, versioned independently |
+| Plugin / skill versions | Platform manifests and skill metadata, versioned independently |
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |
-| Native host installation and skill invocation | Checked on 2026-11-07: Claude Code install PASS, invocation PASS; Codex install PASS, invocation PASS; Antigravity install PASS, invocation PASS |
+| Native host installation and skill invocation | Three-manifest layout, 2026-11-10, `url` source from the branch: Claude Code 2.1.322 and Codex 0.167.0 install PASS (both skills at 0.0.7), invocation not checked; Antigravity not checked. Previous root-manifest layout, 2026-11-07: Claude Code, Codex and Antigravity install and invocation PASS |
 | Provider resume / release pair | Unverified; separate approval and evidence required |
 
 The delegation runtime creates no remote repositories, installs, logins or releases.

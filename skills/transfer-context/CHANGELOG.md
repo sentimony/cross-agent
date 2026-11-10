@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.7 - 2026-11-10
+
+1. Warn through `store_warning` in `facts --json` when the store lies under a temporary
+   directory (`20261104-0624`).
+2. Lighten the surface (`20261106-1735`): `argument-hint` is `[save | resume [<path|id>] | check]`;
+   `write --auto` completes a draft with four sections; `write` prints
+   `resume_command_terminal` and `resume_command_terminal_codex`; the usage check moves to
+   `references/usage-check.md`; `list`, `validate` and `prune` are described in the
+   checkpoint format reference.
+
 ## 0.0.6 - 2026-11-10
 
 1. Add `references/migration.md`: what changed in the rename from `context-transfer`, what

@@ -135,8 +135,104 @@ class WriteTests(unittest.TestCase):
         transfer_id = Path(data['path']).stem
         self.assertEqual(data['resume_command'], '/transfer-context resume ' + transfer_id)
         self.assertEqual(data['resume_command_codex'], '$transfer-context resume ' + transfer_id)
+        root = ct.parse_checkpoint(Path(data['path']).read_text())[0]['project']['root']
+        bin_dir = Path(self.tmp.name) / 'bin'
+        bin_dir.mkdir()
+        for name in ('claude', 'codex'):
+            (bin_dir / name).write_text('#!/bin/sh\nprintf "%s" "$1"\n')
+            (bin_dir / name).chmod(0o755)
+        env = {'PATH': '%s:/usr/bin:/bin' % bin_dir}
+        for key, name, argument in (
+                ('resume_command_terminal', 'claude', '/transfer-context resume ' + transfer_id),
+                ('resume_command_terminal_codex', 'codex', '$transfer-context resume ' + transfer_id)):
+            shell = subprocess.run(['sh', '-c', data[key]], capture_output=True, text=True, env=env)
+            self.assertEqual(shell.stdout, argument, data[key])
         skill = (Path(ct.__file__).parent.parent / 'SKILL.md').read_text()
-        self.assertIn('argument-hint: "[save | resume [<path|id>]', skill)
+        self.assertIn('argument-hint: "[save | resume [<path|id>] | check]"', skill)
+
+    def short_draft(self):
+        import re
+        text = self.draft.read_text()
+        head = text.split('\n## ', 1)[0]
+        body = ''.join('\n## %s\n\nSomething.\n' % name for name in
+                       ('Objective', 'Decisions', 'Failed approaches', 'Pending user decisions'))
+        path = self.draft.with_name('short.md')
+        path.write_text(head + '\n' + body)
+        return path
+
+    def auto_write(self, body):
+        head = self.draft.read_text().split('\n## ', 1)[0]
+        path = self.draft.with_name('auto.md')
+        path.write_text(head + '\n' + body)
+        return subprocess.run([sys.executable, ct.__file__, 'write', '--repo', str(self.repo),
+                               '--store', str(self.store), '--auto', '--json', str(path)],
+                              capture_output=True, text=True)
+
+    def test_auto_keeps_heading_lines_inside_fenced_blocks(self):
+        for fence in ('```', '~~~'):
+            with self.subTest(fence=fence):
+                body = ''.join('\n## %s\n\nText.\n' % name for name in
+                               ('Objective', 'Failed approaches', 'Pending user decisions'))
+                body += '\n## Decisions\n\n%ssh\n## Not a section\n%s\nAfter.\n' % (fence, fence)
+                result = self.auto_write(body)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                text = Path(json.loads(result.stdout)['path']).read_text()
+                decisions = text.split('\n## Decisions\n', 1)[1].split('\n## Pending user decisions', 1)[0]
+                self.assertIn('## Not a section', decisions)
+                self.assertIn('After.', decisions)
+                self.assertEqual(len([l for l in text.splitlines() if l.startswith('## ')]), 12)
+
+    def test_info_string_fence_line_does_not_close_a_fence(self):
+        body = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Objective', 'Failed approaches', 'Pending user decisions'))
+        body += '\n## Decisions\n\n```\nfirst\n```python\n## Hidden\nstill code\n```\nAfter.\n'
+        result = self.auto_write(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        text = Path(json.loads(result.stdout)['path']).read_text()
+        decisions = text.split('\n## Decisions\n', 1)[1].split('\n## Pending user decisions', 1)[0]
+        self.assertIn('## Hidden', decisions)
+        self.assertIn('After.', decisions)
+        self.assertNotIn('\n## Hidden', text.replace(decisions, ''))
+
+    def test_fenced_section_heading_passes_auto_and_validate(self):
+        body = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Decisions', 'Failed approaches', 'Pending user decisions'))
+        body = '\n## Objective\n\n```\n## State\nexample\n```\n' + body
+        result = self.auto_write(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        path = json.loads(result.stdout)['path']
+        check = subprocess.run([sys.executable, ct.__file__, 'validate', '--repo', str(self.repo),
+                                '--store', str(self.store), path], capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertNotIn('out of order', check.stdout + check.stderr)
+
+    def test_auto_rejects_duplicate_section_titles(self):
+        base = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Objective', 'Decisions', 'Failed approaches', 'Pending user decisions'))
+        for extra, title in (('\n## Decisions\n\nAgain.\n', 'Decisions'),
+                             ('\n## Objective and acceptance\n\nAgain.\n', 'Objective and acceptance')):
+            with self.subTest(title=title):
+                result = self.auto_write(base + extra)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(title, result.stdout + result.stderr)
+                self.assertIn('duplicate', (result.stdout + result.stderr).lower())
+
+    def test_auto_fills_missing_sections_from_the_short_draft(self):
+        command = [sys.executable, ct.__file__]
+        args = ['--repo', str(self.repo), '--store', str(self.store)]
+        short = self.short_draft()
+        plain = subprocess.run(command + ['write', *args, '--json', str(short)], capture_output=True, text=True)
+        self.assertNotEqual(plain.returncode, 0)
+        auto = subprocess.run(command + ['write', *args, '--auto', '--json', str(short)],
+                              capture_output=True, text=True)
+        self.assertEqual(auto.returncode, 0, auto.stdout + auto.stderr)
+        path = json.loads(auto.stdout)['path']
+        check = subprocess.run(command + ['validate', *args, path], capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        body = Path(path).read_text()
+        self.assertEqual(len([line for line in body.splitlines() if line.startswith('## ')]), 11)
+        self.assertIn('None recorded.', body)
+        self.assertIn('Something.', body)
 
     def test_secret_artifact_diagnostics_do_not_echo(self):
         secret = 'ghp_EXAMPLEVALUE'
@@ -201,6 +297,39 @@ class WriteTests(unittest.TestCase):
         self.draft.write_text('---\n' + json.dumps(model) + '\n---\n' + body)
         self.assertEqual(first, ct.write_checkpoint(self.draft, self.args))
         self.assertEqual(body.count(ct.RESUME_MARKER), 2)
+
+    def _write_json(self, text):
+        self.draft.write_text(text)
+        command = [sys.executable, ct.__file__, 'write', '--repo', str(self.repo),
+                   '--store', str(self.store), '--json', str(self.draft)]
+        run = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        data = json.loads(run.stdout)
+        return data, ct.parse_checkpoint(Path(data['path']).read_text())[1]
+
+    def test_fenced_resume_heading_before_real_section_is_content(self):
+        fenced = '\n```\n## Resume prompt\nFAKE\n```\n'
+        text = self.draft.read_text().replace('\n## Resume prompt', fenced + '\n## Resume prompt', 1)
+        data, body = self._write_json(text)
+        self.assertTrue(data['resume_prompt'].startswith('None.\n\n' + ct.RESUME_MARKER))
+        self.assertNotIn('FAKE', data['resume_prompt'])
+        self.assertIn(fenced, body)
+        self.assertEqual(body.count(ct.RESUME_MARKER), 2)
+        self.assertLess(body.index('FAKE'), body.index(ct.RESUME_MARKER))
+        real = body.index('\n## Resume prompt\n\nNone.')
+        self.assertLess(real, body.index(ct.RESUME_MARKER))
+        self.assertLess(body.index(ct.RESUME_MARKER), body.index('\n## Objective and acceptance'))
+
+    def test_fenced_heading_inside_resume_section_does_not_end_it(self):
+        text = self.draft.read_text().replace(
+            '## Resume prompt\n\nNone.\n', '## Resume prompt\n\nGo.\n```\n## X\n```\nDone.\n', 1)
+        data, body = self._write_json(text)
+        self.assertTrue(data['resume_prompt'].startswith('Go.\n```\n## X\n```\nDone.\n\n' + ct.RESUME_MARKER))
+        self.assertLess(body.index('Done.'), body.index(ct.RESUME_MARKER))
+
+    def test_nbsp_after_closing_fence_does_not_close_block(self):
+        text = '```\n## Hidden\n```\u00a0\n## Hidden\n```\n## Real\n'
+        self.assertEqual([title for title, _, _ in ct._headings(text)], ['Real'])
 
     def test_symlink_store_is_rejected(self):
         target = Path(self.tmp.name) / 'target'

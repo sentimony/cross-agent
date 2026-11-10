@@ -19,6 +19,13 @@ scanner counts brackets before tokenizing outer arguments; quotation marks insid
 an assignment are ordinary data. Escape a literal unmatched bracket with a backslash.
 Outer tokens use `shlex.split` with no shell execution or variable expansion.
 
+The optional host JSON field `required_roots` is a list of absolute directory paths that
+the task must read. The launcher returns `UNAVAILABLE` with the reason
+`read-only profile cannot read: <root>` before starting a Claude Code read-only process
+when a root lies outside `workspace`. This is a conservative launcher rule: the CLI's
+actual read boundary is not verified (see [cli-runtime.md](cli-runtime.md)). Any other
+value is rejected as `BLOCKED`. Omit the field for no check.
+
 For arbitrary UTF-8 text, use the launcher option `--assignment-file <path>` and
 supply selectors and outer flags in the request string, for example:
 
@@ -36,10 +43,13 @@ A bracket assignment and a file together are ambiguous and rejected; a request w
 either assignment is also rejected. Role and profile still come from the trusted host
 context.
 
-When the host classifies the assignment as `skill`, the first word inside the brackets is
-the installed skill name and the rest is its arguments. A free-text brief without that
-name is read as a skill name and returns `UNAVAILABLE: Explicit skill unavailable`;
-the reason says that the first word in brackets is read as the name of an installed skill.
+When the host classifies the assignment as `skill` (its `assignment_kind`, not the
+request form, decides this), the first word of the assignment is the installed skill name
+and the rest is its arguments, whether the assignment came from the brackets or from
+`--assignment-file`. A free-text brief without that name is read as a skill name and
+returns `UNAVAILABLE: Explicit skill unavailable`; the reason says that the first word of
+the assignment is read as the name of an installed skill and lists the installed skill names. Request parse errors end with the expected form,
+`use '<agent> <model> <effort> [<skill> <brief>]'`.
 
 Each agent group is `<family> [model] [effort]`. Canonical families are `codex`,
 `claude-code`, and `antigravity`; input aliases `claude`, `gemini`, and `agy` remain

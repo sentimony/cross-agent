@@ -263,8 +263,16 @@ def _profile_policy(reviewer, repo, profile, context, resume=False):
             or not isinstance(policy.fresh_evidence, str) or not policy.fresh_evidence.strip()
             or (resume and (not isinstance(policy.resume_evidence, str)
                             or not policy.resume_evidence.strip()))):
-        raise CrossReviewError(EXIT_INVALID_INPUT,
-                               "UNAVAILABLE: execution needs verified scoped host policy")
+        missing = []
+        if isinstance(policy, VerifiedProfilePolicy):
+            if not isinstance(policy.fresh_evidence, str) or not policy.fresh_evidence.strip():
+                missing.append("fresh_evidence")
+            if resume and (not isinstance(policy.resume_evidence, str) or not policy.resume_evidence.strip()):
+                missing.append("resume_evidence")
+        message = "UNAVAILABLE: execution needs verified scoped host policy"
+        if missing:
+            message += "; missing_fields: " + json.dumps(missing)
+        raise CrossReviewError(EXIT_INVALID_INPUT, message)
 
 
 def validate_actual_identity(model, effort, session_id, observed, effort_reported=True):

@@ -65,6 +65,9 @@ class AgentChoice:
     same_cli: bool
 
 
+FORM_HINT = "use '<agent> <model> <effort> [<skill> <brief>]'"
+
+
 def _text(value):
     if not isinstance(value, str) or not value.strip() or value.startswith('-') or any(ord(c) < 32 for c in value):
         raise ValueError('expected nonempty non-option text')
@@ -72,6 +75,16 @@ def _text(value):
 
 
 def parse_request(text: str, assignment_file_text: str = None) -> Request:
+    """Parse a request; every ValueError ends with the expected request form."""
+    try:
+        return _parse_request(text, assignment_file_text)
+    except ValueError as exc:
+        if str(exc).endswith(FORM_HINT):
+            raise
+        raise ValueError(str(exc) + ': ' + FORM_HINT) from exc
+
+
+def _parse_request(text, assignment_file_text):
     """Extract exactly one balanced bracket envelope, preserving its interior bytes.
 
     Backslash escapes the next character for bracket counting only. Outer arguments
@@ -93,29 +106,29 @@ def parse_request(text: str, assignment_file_text: str = None) -> Request:
         if char == '[':
             if depth == 0:
                 if start is not None:
-                    raise ValueError('exactly one assignment required')
+                    raise ValueError('exactly one assignment required: ' + FORM_HINT)
                 start = index
             depth += 1
         elif char == ']':
             if depth == 0:
-                raise ValueError('unmatched closing bracket')
+                raise ValueError('unmatched closing bracket: ' + FORM_HINT)
             depth -= 1
             if depth == 0:
                 end = index
     if assignment_file_text is not None and start is not None:
-        raise ValueError('assignment file conflicts with bracket assignment')
+        raise ValueError('assignment file conflicts with bracket assignment: ' + FORM_HINT)
     if depth or (start is not None and end is None):
-        raise ValueError("one closed assignment required: use '<agent> <model> <effort> [<skill> <brief>]'")
+        raise ValueError('one closed assignment required: ' + FORM_HINT)
     if assignment_file_text is None:
         if start is None:
-            raise ValueError("one closed assignment required: use '<agent> <model> <effort> [<skill> <brief>]'")
+            raise ValueError('one closed assignment required: ' + FORM_HINT)
         assignment = text[start + 1:end]
         outer = text[:start] + ' ' + text[end + 1:]
     else:
         assignment = assignment_file_text
         outer = text
     if not assignment.strip():
-        raise ValueError('empty assignment')
+        raise ValueError('empty assignment: ' + FORM_HINT)
     if assignment_file_text is not None and '\x00' in assignment:
         raise ValueError('assignment contains NUL')
     tokens = shlex.split(outer)

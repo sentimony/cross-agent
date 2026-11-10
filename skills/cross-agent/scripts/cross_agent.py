@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -17,7 +18,7 @@ import uuid
 import cross_agent_state as state_store
 import cli_transport as transport
 from cross_agent_protocol import (ProtocolError, validate_binding, load_skill_context, adapter_call, prepare_stop)
-from cross_agent_request import AgentGroup, FAMILIES, load_config, parse_request, resolve_agents, UnavailableError
+from cross_agent_request import AgentGroup, FAMILIES, FORM_HINT, load_config, parse_request, resolve_agents, UnavailableError
 from cross_agent_state import TaskContext, select_session, reserve_session, update_session, finish_session, StateError
 
 STATUSES = frozenset(('COMPLETED', 'CONSULTATION_REQUIRED', 'USER_INPUT_REQUIRED',
@@ -46,6 +47,8 @@ class HostContext:
     owner_context: dict = field(default_factory=dict)
     skill_context: object = None
     prior_dispositions: object = None
+    required_roots: tuple = ()
+    label: object = None
 
 
 @dataclass
@@ -54,9 +57,35 @@ class DispatchResult:
     task_id: object = None
     target_identity: dict = field(default_factory=dict)
     results: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
+
+
+def _temp_roots():
+    return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
+
+
+def _under_temp(path, roots):
+    """True when the normalized or the symlink-resolved path is under a root as given or resolved."""
+    path = Path(os.path.normpath(path))
+    resolved = path.resolve()
+    candidates = tuple(roots) + tuple(root.resolve() for root in roots)
+    return any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in candidates)
+
+
+def _temp_warnings(paths, roots):
+    """Warn for each state path under a temporary directory, which a reboot may clear."""
+    warnings = []
+    for key in ('artifact_root', 'registry_path'):
+        path = paths.get(key)
+        if path is None:
+            continue
+        path = Path(path)
+        if _under_temp(path, roots):
+            warnings.append('%s under a temporary directory: %s' % (key, path))
+    return warnings
 
 
 def _write(path, value):
@@ -149,6 +178,34 @@ def _codex_turn_context(thread_id, env=None):
     return context
 
 
+def _codex_rate_limits(thread_id, env=None):
+    """Rate-limit snapshot of the last token_count event in the child's Codex rollout, or None
+    when that event has none.
+
+    The snapshot is taken after the run; there is none before it, so no delta exists."""
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    env = os.environ if env is None else env
+    home = env.get('HOME') or pwd.getpwuid(os.getuid()).pw_dir
+    root = Path(env.get('CODEX_HOME') or Path(home) / '.codex') / 'sessions'
+    limits = None
+    for path in sorted(root.glob('*/*/*/rollout-*-' + thread_id + '.jsonl')):
+        for line in path.read_text('utf-8', errors='replace').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            payload = event.get('payload')
+            if (event.get('type') == 'event_msg' and isinstance(payload, dict)
+                    and payload.get('type') == 'token_count'):
+                # Every token_count event replaces the snapshot, so a later one without
+                # rate limits (for example from a resumed run) leaves none.
+                limits = payload['rate_limits'] if isinstance(payload.get('rate_limits'), dict) else None
+    return limits
+
+
 def _provider(family, run, requested_model=None, env=None):
     """Read only provider envelope fields, never identity in assistant content."""
     raw = (run / 'stdout.json').read_text('utf-8', errors='replace')
@@ -239,7 +296,8 @@ def _provider_ids(family, run):
     return ids
 
 
-def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False):
+def _usage(agent, reported, observed, decision, previous_run, run, round_no, adopted=False,
+           rate_limits=None):
     previous = transport._read_usage(previous_run) if previous_run is not None else None
     # Failed or mismatched identity evidence is not a cumulative accounting base,
     # even when its raw provider totals look complete.
@@ -259,6 +317,7 @@ def _usage(agent, reported, observed, decision, previous_run, run, round_no, ado
     usage['provider_reported'] = dict(reported,
         scope='session' if agent.family != 'codex' else 'round')
     usage['delta_reason'] = None
+    usage['rate_limits'] = rate_limits if agent.family == 'codex' else None
     if decision.resume and agent.family != 'codex':
         _, _, usage['delta_reason'] = transport.resume_usage(
             reported['tokens'], reported['cost_usd'], previous,
@@ -444,6 +503,13 @@ def dispatch(request, host_context):
                 single = replace(single, task_selector=result.task_id)
             if isinstance(agent, UnavailableError):
                 raise agent
+            if agent.family == 'claude-code' and agent.profile == 'read-only':
+                # Conservative rule: refuse a declared root outside the workspace; the
+                # CLI's own read boundary is not verified.
+                workspace = Path(host.workspace).resolve()
+                for root in host.required_roots:
+                    if not Path(root).resolve().is_relative_to(workspace):
+                        raise UnavailableError('read-only profile cannot read: ' + root)
             decision = select_session(single, host.task_context, agent, agent.role, agent.profile)
             entry.update(task_id=decision.task_id, session_id=decision.session_id,
                          role=decision.role, profile=decision.profile, selection_reason=decision.reason)
@@ -488,7 +554,7 @@ def dispatch(request, host_context):
             # Only Claude Code takes the launcher's ID; recording it lets --status
             # read the transcript of a fresh run before the provider confirms it.
             launch_id = cli_id if not resume and agent.family == 'claude-code' else None
-            run_id = reserve_session(host.task_context, decision, str(run), launch_id)
+            run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
@@ -515,8 +581,10 @@ def dispatch(request, host_context):
             try:
                 text, observed, reported = _provider(agent.family, run, agent.model, child_env)
                 entry['observed_identity'] = observed
+                limits = (_codex_rate_limits(observed.get('cli_session_id'), child_env)
+                          if agent.family == 'codex' else None)
                 entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
-                                        round_no, adopted)
+                                        round_no, adopted, limits)
                 entry['artifacts']['usage'] = str(run / 'usage.json')
             except (OSError, ValueError, TypeError) as exc:
                 if entry['status'] == 'COMPLETED':
@@ -792,7 +860,7 @@ def status(host, config_dir=None):
                or session['task_id'], 'family': session['family'], 'model': session['model'],
                'effort': session['effort'], 'cli_session_id': cli,
                'launch_cli_session_id': launch, 'state': session['status'],
-               'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
+               'label': run.get('label'), 'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
                'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
         if session['family'] == 'claude-code' and (cli or launch):
@@ -830,6 +898,8 @@ def main(argv=None):
     parser.add_argument('--adopt-cli-session', metavar='UUID',
                         help='Bind this existing provider session to a registry session, print its ID and exit')
     parser.add_argument('--assignment-file', metavar='PATH', help='Read assignment as strict UTF-8')
+    parser.add_argument('--label', metavar='TEXT',
+                        help='Short label (at most 40 characters) stored on the run and shown by --status')
     parser.add_argument('--status', action='store_true',
                         help='Print the sessions of this repository with their last activity and exit')
     parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
@@ -844,13 +914,29 @@ def main(argv=None):
         raw['policy'] = transport.VerifiedProfilePolicy(**policy)
     if 'pass_env' in raw:
         raw['pass_env'] = tuple(transport.validate_pass_env(raw['pass_env']))
+    roots = raw.get('required_roots', [])
+    if (not isinstance(roots, list)
+            or any(not isinstance(p, str) or not os.path.isabs(p) for p in roots)):
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
+                          'reason': 'required_roots must be a list of absolute path strings'}))
+        return 2
+    raw['required_roots'] = tuple(roots)
     host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
                        task_context=task, **raw)
+    if args.label is not None:
+        try:
+            state_store.check_label(args.label)
+        except StateError as exc:
+            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+            return 2
+        host = replace(host, label=args.label)
     if args.status:
         print(json.dumps(status(host), ensure_ascii=False, indent=1))
         return 0
     if args.request is None:
-        parser.error('request is required')
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
+                          'reason': 'request is required: ' + FORM_HINT}))
+        return 2
     try:
         assignment = None
         if args.assignment_file is not None:
@@ -867,11 +953,15 @@ def main(argv=None):
             return 2
         print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
         return 0
+    warnings = _temp_warnings({'artifact_root': host.artifact_root,
+                               'registry_path': task.registry_path}, _temp_roots())
     try:
         result = dispatch(request, host)
     except (ValueError, transport.CrossReviewError) as exc:
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc),
+                          'warnings': warnings}))
         return 2
+    result.warnings = warnings
     print(json.dumps(result.to_dict()))
     return 0 if all(r['status'] == 'COMPLETED' for r in result.results) else 1
 

@@ -10,5 +10,5 @@ ln -s /absolute/path/to/skills/transfer-context .agents/skills/transfer-context
 ```
 
 Claude Code can use the optional [hook settings](hooks.md). Codex uses the skill manually;
-this package provides no Codex manifest or hooks. A checkpoint's resume prompt includes
+this package provides no Codex hooks. A checkpoint's resume prompt includes
 manual checks for a session where the skill is unavailable.

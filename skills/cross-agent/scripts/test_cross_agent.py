@@ -68,6 +68,152 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         return [sys.executable, str(Path(__file__).with_name('cross_agent.py')),
                 '--host-context', str(host), '--config', str(config)]
 
+    def run_claude_read_only(self, required_roots):
+        import subprocess, sys
+        fake = self.bin / 'claude'
+        fake.write_text('#!/usr/bin/env python3\nfrom pathlib import Path\nPath(%r).write_text("launched")\n'
+                        % str(self.root / 'launched'))
+        fake.chmod(0o700)
+        config = self.root / 'claude-config.json'
+        config.write_text(json.dumps({'schema_version': 1, 'agents': {'claude-code': {
+            'models': {'claude-opus-5-5': ['low']}, 'default_model': 'claude-opus-5-5',
+            'default_effort': 'low', 'profiles': ['read-only'],
+            'capabilities': {'read-only': 'supported'}}}}))
+        document = {'task_context': {'registry_path': str(self.root / 'registry'),
+                                     'repo': str(self.root), 'conversation_id': 'conversation'},
+                    'role': 'consultation', 'profile': 'read-only', 'host_family': 'codex',
+                    'workspace': str(self.root), 'artifact_root': str(self.root / 'artifacts'),
+                    'target_identity': {'tree': 'snapshot'},
+                    'environment': {'PATH': str(self.bin), 'HOME': str(self.root)}, 'timeout_seconds': 2}
+        if required_roots is not None:
+            document['required_roots'] = required_roots
+        host = self.root / 'claude-host.json'
+        host.write_text(json.dumps(document))
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name('cross_agent.py')),
+                                 '--host-context', str(host), '--config', str(config),
+                                 '--assignment-file', str(assignment), 'claude'],
+                                capture_output=True, text=True)
+        return result, json.loads(result.stdout)
+
+    def test_required_root_outside_workspace_blocks_claude_read_only_before_launch(self):
+        outside = Path(tempfile.mkdtemp(dir=str(self.root.parent)))
+        self.addCleanup(outside.rmdir)
+        result, document = self.run_claude_read_only([str(outside)])
+        entry = document['results'][0]
+        self.assertEqual(entry['status'], 'UNAVAILABLE', result.stdout + result.stderr)
+        self.assertEqual(entry['reason'], 'read-only profile cannot read: ' + str(outside))
+        self.assertFalse((self.root / 'launched').exists())
+
+    def test_required_root_inside_workspace_or_absent_launches_as_before(self):
+        (self.root / 'sub').mkdir()
+        for roots in ([str(self.root / 'sub')], None):
+            with self.subTest(roots=roots):
+                (self.root / 'launched').unlink(missing_ok=True)
+                __import__('shutil').rmtree(self.root / 'registry', ignore_errors=True)
+                result, document = self.run_claude_read_only(roots)
+                self.assertNotIn('cannot read', document['results'][0].get('reason', ''))
+                self.assertTrue((self.root / 'launched').exists(), result.stdout)
+
+    def test_required_roots_must_be_absolute_strings(self):
+        for bad in ('relative', ['relative'], [1]):
+            with self.subTest(bad=bad):
+                result, document = self.run_claude_read_only(bad)
+                self.assertEqual(document['status'], 'BLOCKED', result.stdout)
+                self.assertIn('required_roots', document['reason'])
+
+    def test_label_is_stored_and_shown_in_status_rows(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        base = self.cli_base()
+        run = subprocess.run(base + ['--label', 'wd', '--assignment-file', str(assignment), 'codex'],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        status = subprocess.run(base + ['--status'], capture_output=True, text=True)
+        self.assertEqual([row['label'] for row in json.loads(status.stdout)['sessions']], ['wd'])
+
+    def test_invalid_label_blocks_before_any_launch(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        for bad in ('a\nb', 'x' * 41, ''):
+            with self.subTest(bad=bad):
+                result = subprocess.run(self.cli_base() + ['--label', bad, '--assignment-file',
+                                                           str(assignment), 'codex'],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                document = json.loads(result.stdout)
+                self.assertEqual(document['status'], 'BLOCKED')
+                self.assertIn('--label', document['reason'])
+                self.assertFalse((self.root / 'registry').exists())
+
+    def test_temp_warnings_unit(self):
+        import cross_agent as ca
+        roots = (Path('/scratch-tmp'),)
+        both = {'artifact_root': Path('/scratch-tmp/a'), 'registry_path': Path('/scratch-tmp/r')}
+        self.assertEqual(ca._temp_warnings(both, roots),
+                         ['artifact_root under a temporary directory: /scratch-tmp/a',
+                          'registry_path under a temporary directory: /scratch-tmp/r'])
+        one = {'artifact_root': Path('/scratch-tmp/a'), 'registry_path': Path('/home/u/r')}
+        self.assertEqual(ca._temp_warnings(one, roots),
+                         ['artifact_root under a temporary directory: /scratch-tmp/a'])
+        none = {'artifact_root': Path('/home/u/a'), 'registry_path': Path('/home/u/r')}
+        self.assertEqual(ca._temp_warnings(none, roots), [])
+
+    def test_temp_warnings_resolved_roots_and_normalized_paths(self):
+        import cross_agent as ca
+        real = self.root / 'real'
+        real.mkdir()
+        link = self.root / 'link'
+        link.symlink_to(real)
+        for spelling in (link, real):
+            with self.subTest(spelling=str(spelling)):
+                warnings = ca._temp_warnings({'artifact_root': spelling / 'a', 'registry_path': Path('/home/u/r')},
+                                             (link,))
+                self.assertEqual(len(warnings), 1, warnings)
+        roots = (Path('/scratch-tmp'),)
+        self.assertEqual(ca._temp_warnings({'artifact_root': Path('/scratch-tmp/../home/u/state')}, roots), [])
+
+    def test_blocked_dispatch_keeps_temp_warnings(self):
+        import subprocess
+        base = self.cli_base()
+        host = Path(base[base.index('--host-context') + 1])
+        document = json.loads(host.read_text())
+        document['timeout_seconds'] = 0
+        host.write_text(json.dumps(document))
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run(base + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertEqual(document['status'], 'BLOCKED')
+        self.assertIn('artifact_root under a temporary directory: ' + str(self.root / 'artifacts'),
+                      document['warnings'])
+
+    def test_dispatch_result_warns_about_temporary_artifact_root(self):
+        import subprocess
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run(self.cli_base() + ['--assignment-file', str(assignment), 'codex'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertNotEqual(document['results'][0]['status'], 'BLOCKED')
+        self.assertIn('artifact_root under a temporary directory: ' + str(self.root / 'artifacts'),
+                      document['warnings'])
+
+    def test_adopt_without_request_is_blocked_with_form(self):
+        import subprocess
+        result = subprocess.run(self.cli_base() + ['--adopt-cli-session', '12345678-1234-1234-1234-123456789abc'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        document = json.loads(result.stdout)
+        self.assertEqual(document['status'], 'BLOCKED')
+        self.assertIn("use '<agent> <model> <effort>", document['reason'])
+
     def test_assignment_file_reaches_fake_cli_exactly(self):
         import subprocess
         brief = 'Unmatched [ and ] ]\r\n- [ ] café \\ path\r\n'
@@ -371,6 +517,55 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         self.assertEqual(second['status'], 'COMPLETED')
         self.assertEqual(first['session_id'], second['session_id'])
         self.assertEqual(first['cli_session_id'], second['cli_session_id'])
+
+    def codex_with_rollout(self, extra_line):
+        fixture = self.bin / 'codex'
+        text = fixture.read_text()
+        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        self.assertEqual(text.count(old), 1)
+        rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
+                   "day.mkdir(parents=True,exist_ok=True)\n"
+                   "with open(day/('rollout-2026-11-03T00-00-00-'+sid+'.jsonl'),'a') as f:\n"
+                   " f.write(json.dumps({'type':'turn_context','payload':{'model':'gpt-6.1-sol','effort':'low'}})+'\\n')\n"
+                   + extra_line)
+        fixture.write_text(text.replace(old, rollout))
+
+    def test_codex_rate_limits_from_rollout_reach_usage_json(self):
+        limits = {'primary': {'used_percent': 31, 'window_minutes': 300, 'resets_at': 1794000000},
+                  'secondary': {'used_percent': 12, 'window_minutes': 10080, 'resets_at': 1794500000},
+                  'plan_type': 'plus'}
+        self.codex_with_rollout(
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':%r}})+'\\n')" % limits)
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        usage = json.loads(Path(entry['artifacts']['usage']).read_text())
+        self.assertEqual(usage['rate_limits']['primary']['used_percent'], 31)
+        self.assertEqual(usage['rate_limits'], limits)
+
+    def test_rate_limits_skip_non_object_rollout_lines(self):
+        limits = {'primary': {'used_percent': 5}}
+        self.codex_with_rollout(
+            " f.write('[]\\nnull\\n3\\n')\n"
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':%r}})+'\\n')" % limits)
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        self.assertEqual(json.loads(Path(entry['artifacts']['usage']).read_text())['rate_limits'], limits)
+
+    def test_last_token_count_without_rate_limits_resets_the_snapshot(self):
+        self.codex_with_rollout(
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':{'primary':{'used_percent':9}}}})+'\\n')\n"
+            " f.write(json.dumps({'type':'event_msg','payload':{'type':'token_count','rate_limits':None}})+'\\n')")
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        self.assertIsNone(json.loads(Path(entry['artifacts']['usage']).read_text())['rate_limits'])
+
+    def test_rollout_without_token_count_gives_null_rate_limits(self):
+        self.codex_with_rollout(" pass")
+        entry = dispatch(parse_request('codex [read]'), self.host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED')
+        usage = json.loads(Path(entry['artifacts']['usage']).read_text())
+        self.assertIn('rate_limits', usage)
+        self.assertIsNone(usage['rate_limits'])
 
     def test_invalid_handoff_keeps_child_status_for_resume(self):
         fixture = self.bin / 'codex'

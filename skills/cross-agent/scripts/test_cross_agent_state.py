@@ -65,6 +65,26 @@ class SnapshotReadTests(unittest.TestCase):
         with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
             read_registry(self.ctx)
 
+    def test_snapshot_unsafe_mode_names_path_label_and_mode(self):
+        import re
+        from cross_agent_state import read_registry
+        (self.dir / 'registry.json').chmod(0o644)
+        pattern = 'UNSAFE_REGISTRY_PATH: registry file ' + re.escape(str(self.dir / 'registry.json')) \
+            + ' mode 644, expected 600'
+        with self.assertRaisesRegex(StateError, pattern):
+            read_registry(self.ctx)
+
+    def test_owner_mismatch_names_both_uids(self):
+        import re
+        from unittest.mock import patch
+        from cross_agent_state import read_registry
+        uid = os.getuid()
+        pattern = 'UNSAFE_REGISTRY_PATH: registry_path ' + re.escape(str(self.dir)) \
+            + ' owner uid %d, expected uid %d' % (uid, uid + 1)
+        with patch('cross_agent_state.os.getuid', return_value=uid + 1):
+            with self.assertRaisesRegex(StateError, pattern):
+                read_registry(self.ctx)
+
 
 class StateTests(unittest.TestCase):
     def setUp(self):
@@ -235,6 +255,17 @@ print(reserve_session(c,d,'/crashed/artifacts'))
         with patch('cross_agent_state.os.getuid', return_value=os.getuid() + 1):
             with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
                 self.choose()
+
+    def test_unsafe_modes_name_path_and_mode(self):
+        self.choose()
+        directory = Path(self.ctx.registry_path)
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(StateError, r'UNSAFE_REGISTRY_PATH: registry_path .+ mode 755, expected 700'):
+            self.choose()
+        directory.chmod(0o700)
+        (directory / 'registry.json').chmod(0o644)
+        with self.assertRaisesRegex(StateError, r'registry\.json mode 644, expected 600'):
+            self.choose()
 
     def test_atomic_write_failure_preserves_registry(self):
         from unittest.mock import patch

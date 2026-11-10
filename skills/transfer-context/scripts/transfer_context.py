@@ -196,6 +196,26 @@ def resolve_store(args):
     return store
 
 
+def _temp_roots():
+    return tuple(Path(p) for p in ('/tmp', '/private/tmp', '/var/tmp')) + (Path(tempfile.gettempdir()).resolve(),)
+
+
+def _under_temp(path, roots):
+    """True when the normalized or the symlink-resolved path is under a root as given or resolved."""
+    path = Path(os.path.normpath(path))
+    resolved = path.resolve()
+    candidates = tuple(roots) + tuple(root.resolve() for root in roots)
+    return any(path.is_relative_to(root) or resolved.is_relative_to(root) for root in candidates)
+
+
+def _store_warning(store, roots):
+    """Name a store under a temporary directory, which a reboot may clear."""
+    store = Path(store)
+    if _under_temp(store, roots):
+        return 'store under a temporary directory: %s; a reboot may clear it' % store
+    return None
+
+
 def store_report(store, args):
     """Name the store kind so a legacy store is never used silently."""
     if getattr(args, 'store', None) or os.environ.get('CONTEXT_TRANSFER_DIR'):
@@ -503,12 +523,14 @@ def validate_checkpoint(meta, body, root, mode):
                 display = '[redacted]' if _secret_errors(path) else path
                 (errors if mode == 'draft' else warnings).append('missing artifact ' + display)
     positions = []
+    first = {}
+    for title, start, _ in _headings(body):
+        first.setdefault(title, start)
     for section in SECTIONS:
-        found = re.search(r'^## ' + re.escape(section) + r'\s*$', body, re.MULTILINE)
-        if not found:
+        if section not in first:
             errors.append('missing section ' + section)
         else:
-            positions.append(found.start())
+            positions.append(first[section])
     if positions != sorted(positions):
         errors.append('sections out of order')
     errors.extend(_secret_errors('---\n' + json.dumps(meta, indent=2) + '\n---\n' + body))
@@ -545,11 +567,18 @@ def _without_resume(body):
     return re.sub(pattern, '', body, flags=re.DOTALL)
 
 
+def _section_span(body, title):
+    """(content_start, content_end) of the first `## <title>` heading outside fences."""
+    marks = _headings(body)
+    for index, (name, _, end) in enumerate(marks):
+        if name == title:
+            return end, marks[index + 1][1] if index + 1 < len(marks) else len(body)
+    raise ValidationError('missing section ' + title)
+
+
 def _resume_body(body, path, root):
     body = _without_resume(body)
-    heading = re.search(r'^## Resume prompt\s*$', body, re.MULTILINE)
-    next_heading = re.search(r'^## ', body[heading.end():], re.MULTILINE)
-    end = heading.end() + next_heading.start() if next_heading else len(body)
+    end = _section_span(body, 'Resume prompt')[1]
     quoted = shlex.quote(str(root))
     block = (RESUME_MARKER + '\nCheckpoint: ' + str(path.resolve()) + '\n'
              + '```sh\n' + '\n'.join('git -C ' + quoted + ' ' + command for command in
@@ -571,11 +600,74 @@ def _atomic_write(path, data):
             os.unlink(temp)
 
 
+_FENCE_LINE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)$')
+
+
+def _headings(text):
+    """(title, start, end) of each `## ` heading line outside fenced code blocks.
+
+    CommonMark rules: an opening fence has up to 3 spaces of indent, sets the character
+    and the length; a closing fence uses the same character, is at least as long and is
+    followed only by spaces and tabs. A backtick fence cannot have backticks in its info string."""
+    found, fence, offset = [], None, 0
+    for line in text.split('\n'):
+        match = _FENCE_LINE.match(line)
+        if fence is None:
+            if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+                fence = match.group(1)
+            elif line.startswith('## '):
+                found.append((line[3:].strip(), offset, offset + len(line)))
+        elif (match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence)
+                and re.fullmatch(r'[ \t]*', match.group(2))):
+            fence = None
+        offset += len(line) + 1
+    return found
+
+
+def _auto_fill(text, meta, facts):
+    """Complete a short draft (Objective, Decisions, Failed approaches, Pending user
+    decisions) to the eleven sections, from facts or `None recorded.`"""
+    marks = _headings(text)
+    head = text[:marks[0][1]].rstrip('\n') if marks else text.rstrip('\n')
+    given, order = {}, []
+    for index, (title, _, end) in enumerate(marks):
+        title = 'Objective and acceptance' if title == 'Objective' else title
+        if title in given:
+            raise ValidationError('duplicate section ' + title)
+        stop = marks[index + 1][1] if index + 1 < len(marks) else len(text)
+        given[title] = text[end:stop].strip('\n')
+        order.append(title)
+    task = meta.get('task') if isinstance(meta.get('task'), dict) else {}
+    project = facts['project']
+    sessions = facts.get('delegated_sessions')
+    verification = meta.get('verification') if isinstance(meta.get('verification'), dict) else {}
+    derived = {
+        'Resume prompt': ('Continue: %s. Next: %s.' % (task['objective'], task['next_action'])
+                          if task.get('objective') and task.get('next_action') else None),
+        'State': 'Branch %s at %s; %d modified, %d untracked.' % (
+            project.get('branch') or 'none', (project.get('head') or 'none')[:12],
+            len(project.get('dirty', [])), len(project.get('untracked', []))),
+        'Running now': ('\n'.join('- %s %s: %s' % (s.get('family'), s.get('session_id'), s.get('state'))
+                                 for s in sessions) if isinstance(sessions, list) and sessions else None),
+        'Verification': ('Status: %s.' % verification['status'] if verification.get('status') else None),
+        'Next actions': task.get('next_action') or None,
+    }
+    parts = []
+    for section in SECTIONS:
+        content = given.get(section) or derived.get(section) or 'None recorded.'
+        parts.append('## ' + section + '\n\n' + content + '\n')
+    parts += ['## ' + title + '\n\n' + given[title] + '\n' for title in order if title not in SECTIONS]
+    return head + '\n' + '\n'.join(parts)
+
+
 def write_checkpoint(draft_path, args):
     text = Path(draft_path).read_text(encoding='utf-8')
     meta, body = parse_checkpoint(text)
     facts = collect_facts(args.repo, getattr(args, 'host_context', None))
     project = facts['project']
+    if getattr(args, 'auto', False):
+        text = _auto_fill(text, meta, facts)
+        meta, body = parse_checkpoint(text)
     errors, warnings = validate_checkpoint(meta, body, project['root'], 'draft')
     errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(text)
     if errors:
@@ -802,6 +894,8 @@ def main(argv=None):
             sub.add_argument('--statusline', action='store_true')
             for option in ('transcript', 'rollout', 'prepare', 'refresh', 'rotate'):
                 sub.add_argument('--' + option)
+        if name == 'write':
+            sub.add_argument('--auto', action='store_true')
         if name in ('write', 'validate'):
             sub.add_argument('--budget', type=int, default=12000)
             sub.add_argument('path')
@@ -833,14 +927,20 @@ def main(argv=None):
             path = write_checkpoint(args.path, args)
             store_line = store_report(path.parent, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
-            resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
+            start, stop = _section_span(body, 'Resume prompt')
+            resume = body[start:stop].strip()
             commands = '/transfer-context resume ' + path.stem
             codex = '$transfer-context resume ' + path.stem
+            root = shlex.quote(parse_checkpoint(path.read_text(encoding='utf-8'))[0]['project']['root'])
+            terminal = 'cd %s && claude %s' % (root, shlex.quote(commands))
+            terminal_codex = 'cd %s && codex %s' % (root, shlex.quote(codex))
             if getattr(args, 'json', False):
                 print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
-                                  'resume_command_codex': codex, 'store': store_line}))
+                                  'resume_command_codex': codex, 'resume_command_terminal': terminal,
+                                  'resume_command_terminal_codex': terminal_codex, 'store': store_line}))
             else:
-                print(str(path) + '\nstore: ' + store_line + '\n' + resume + '\n' + commands + '\n' + codex)
+                print(str(path) + '\nstore: ' + store_line + '\n' + resume + '\n' + commands + '\n' + codex
+                      + '\n' + terminal + '\n' + terminal_codex)
             return 0
         if args.command == 'validate':
             raw = Path(args.path).read_text(encoding='utf-8')
@@ -861,6 +961,7 @@ def main(argv=None):
         facts = collect_facts(args.repo, getattr(args, 'host_context', None))
         facts['context'] = usage
         facts['store'] = store_report(store, args)
+        facts['store_warning'] = _store_warning(store, _temp_roots())
         target = read_latest(store, facts['project']['worktree'])
         if target:
             facts['checkpoints'].append(str(store / (target + '.md')))

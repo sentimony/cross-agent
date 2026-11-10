@@ -63,6 +63,22 @@ class ClaudeOrchestratorProfile(unittest.TestCase):
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits')
         self.assertEqual(argv[-2:], ['--resume', SESSION])
 
+    def test_incomplete_evidence_names_missing_fields(self):
+        def with_evidence(fresh, resume):
+            return transport.VerifiedProfilePolicy('claude-code', str(self.repo), fresh, resume,
+                                                   ('read', 'write-workspace', 'orchestrate'), True, False)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('', 'owner attested'))
+        self.assertIn('missing_fields: ["fresh_evidence"]', caught.exception.message)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('', ''), transport.build_resume_command)
+        self.assertIn('missing_fields: ["fresh_evidence", "resume_evidence"]', caught.exception.message)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('owner attested', ''), transport.build_resume_command)
+        self.assertIn('missing_fields: ["resume_evidence"]', caught.exception.message)
+        self.build(with_evidence('owner attested', 'owner attested'), transport.build_resume_command)
+        self.build(with_evidence('owner attested', ''))
+
     def test_claude_execution_needs_explicit_orchestrate_action(self):
         for pol in (policy(self.repo, actions=('read', 'write-workspace')),
                     policy(self.repo, delegation_blocked=False),
@@ -402,6 +418,61 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
         [row] = status(self.host)['sessions']
         self.assertEqual(row['state'], 'completed')
         self.assertEqual(row['elapsed_seconds'], 10)
+
+    def reserved_run(self, label):
+        from cross_agent_request import resolve_agents
+        from cross_agent_state import SessionDecision, _registry, adopt_session, reserve_session
+        cli = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        agent = resolve_agents(parse_request('claude opus high [x]'), self.host.config, 'claude')[0]
+        sid = adopt_session(self.host.task_context, agent, cli)
+        with _registry(self.host.task_context) as data:
+            task_id = data['sessions'][sid]['task_id']
+        decision = SessionDecision('READY', 'RESUME', task_id, sid, True, cli, 'claude-code',
+                                   'claude-opus-5-5', 'high', 'execution', 'execution')
+        return sid, reserve_session(self.host.task_context, decision, str(self.root / 'run'), label=label)
+
+    def test_status_rows_carry_the_run_label_or_none(self):
+        from cross_agent import status
+        self.reserved_run('wd')
+        [row] = status(self.host)['sessions']
+        self.assertEqual(row['label'], 'wd')
+
+    def test_status_row_without_label_is_none(self):
+        from cross_agent import status
+        self.reserved_run(None)
+        [row] = status(self.host)['sessions']
+        self.assertIsNone(row['label'])
+
+    def test_status_marks_a_dead_pid_as_not_alive(self):
+        import subprocess
+        from cross_agent import status
+        from cross_agent_state import _registry
+        sid, _ = self.reserved_run('wd')
+        child = subprocess.Popen([sys.executable, '-c', 'pass'])
+        child.wait()
+        with _registry(self.host.task_context) as data:
+            data['sessions'][sid]['runs'][-1]['pid'] = child.pid
+        [row] = status(self.host)['sessions']
+        self.assertIs(row['alive'], False)
+        self.assertEqual(row['label'], 'wd')
+
+    def test_invalid_labels_are_rejected_by_the_state_layer(self):
+        from cross_agent_state import StateError
+        for bad in ('a\nb', 'x' * 41, '', 5, 'a\u0085b', 'a\u009bb'):
+            with self.subTest(bad=bad), self.assertRaises(StateError):
+                self.reserved_run(bad)
+
+    def test_stored_bad_label_is_rejected_when_the_registry_is_read(self):
+        from cross_agent import status
+        from cross_agent_state import StateError
+        self.reserved_run('wd')
+        path = Path(self.host.task_context.registry_path) / 'registry.json'
+        original = path.read_text()
+        for bad in ('a\u0085b', 'a\nb', 'x' * 41, ''):
+            with self.subTest(bad=bad):
+                path.write_text(original.replace('"label": "wd"', '"label": %s' % json.dumps(bad)))
+                with self.assertRaisesRegex(StateError, 'CORRUPT_REGISTRY'):
+                    status(self.host)
 
     def test_status_never_writes_the_registry(self):
         import os

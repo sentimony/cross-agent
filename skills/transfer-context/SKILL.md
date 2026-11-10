@@ -1,9 +1,9 @@
 ---
 name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint.
-argument-hint: "[save | resume [<path|id>] | check | list | validate <path> | prune --keep <n>]"
+argument-hint: "[save | resume [<path|id>] | check]"
 metadata:
-  version: "0.0.6"
+  version: "0.0.7"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -21,7 +21,8 @@ and [migration from context-transfer](references/migration.md).
 1. Run `facts --json` to collect project state, context usage and the latest checkpoint.
    Pass `--host-context <json>` when the host has a cross-agent context. The script reads
    delegated sessions through the sibling launcher's `--status`; otherwise it records why
-   they were not captured.
+   they were not captured. Show the user `facts['store']`: a `legacy (...)` store means
+   older checkpoints live there and are not migrated automatically.
 2. Write a draft in the [checkpoint format](references/checkpoint-format.md). Put decisions
    and constraints before history. Explicitly record relevant work and external state outside
    the current worktree. Reference artifacts by path instead of copying them.
@@ -31,11 +32,15 @@ and [migration from context-transfer](references/migration.md).
 3. Compare claims of completion with evidence already collected in this session. Do not
    rerun tests for this step; mark results without fresh evidence `unverified`.
 4. Exclude secrets and private material, including secrets beyond the script's known
-   patterns. Run `write <draft>` and report its checkpoint path, resume prompt and the
-   ready commands `/transfer-context resume <id>` (`$transfer-context resume <id>` for Codex). The
-   script validates the draft, writes atomically and updates the latest pointer; a budget
-   warning does not truncate the body. Save does not change project files, commit, discard
-   changes or perform outward actions.
+   patterns. Run `write <draft>` (add `--auto` when the draft has only the sections
+   `Objective`, `Decisions`, `Failed approaches` and `Pending user decisions`: the script
+   fills the rest from facts or `None recorded.`) and report its checkpoint path, resume
+   prompt and the ready commands `/transfer-context resume <id>`
+   (`$transfer-context resume <id>` for Codex) and the terminal forms
+   `resume_command_terminal` and `resume_command_terminal_codex`. The script validates
+   the draft, writes atomically and updates the latest pointer; a budget warning does not
+   truncate the body. Save does not change project files, commit, discard changes or
+   perform outward actions.
 
 ## Resume
 
@@ -53,22 +58,11 @@ and [migration from context-transfer](references/migration.md).
 
 ## Check
 
-Run `usage --json` and act on its level:
+Run `usage --json` and act on its level (`prepare`, `refresh`, `rotate`, `ok`, `unknown`);
+levels, thresholds and flags are in [usage check](references/usage-check.md).
 
-1. `prepare`: save a checkpoint.
-2. `refresh`: update the checkpoint.
-3. `rotate`: update the checkpoint and suggest a new session with its resume prompt.
-4. `ok`: take no action.
-5. `unknown`: report that measurement is unavailable, without inventing a number.
-
-The default prepare, refresh and rotate thresholds are 50%, 62% and 75% of the context
-window, or 100000, 125000 and 150000 tokens when the window is unknown; flags or
-`config.json` can override them with a percentage or an integer token count.
-
-Usage accepts `--statusline`, `--transcript <path>`, `--rollout <path>` and threshold
-flags `--prepare`, `--refresh`, `--rotate`. All commands accept `--repo`, `--store` and
-`--json`. `list`, `validate <path>` and `prune --keep <n> [--all]` manage checkpoints;
-pruning is explicit. See the format reference for storage and validation details.
+`list`, `validate <path>` and `prune --keep <n> [--all]` manage checkpoints; pruning is
+explicit. See [checkpoint format](references/checkpoint-format.md).
 
 ## Security Model
 
