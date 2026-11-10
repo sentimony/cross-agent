@@ -30,7 +30,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn(name,listed)
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.6')):
+        for name, version in (('cross-agent', '0.0.7'), ('transfer-context', '0.0.7')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])

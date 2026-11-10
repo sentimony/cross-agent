@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.7 - 2026-11-10
+
+1. Name the bracketed assignment form in every request parse error, list the installed
+   skill names when the first word is not one, and show a double-quoted dispatch example
+   (`20261104-1532`).
+2. Report the path, mode and owner in `UNAVAILABLE`/`UNSAFE_REGISTRY_PATH` registry errors;
+   `--adopt-cli-session` without a request answers `BLOCKED` with the expected form
+   (`20261104-1654`).
+3. Warn in the dispatch result when `artifact_root` or `registry_path` lies under a
+   temporary directory (`20261104-0624`).
+4. Name the empty evidence fields as `missing_fields` when a profile policy is incomplete,
+   and document how to verify a profile (`20261104-1631`).
+5. Check the optional `required_roots` against the Claude Code read-only profile before
+   launch, and add a profile capability table to `cli-runtime.md` that marks only
+   evidenced limits as verified (`20261104-1616`).
+6. Add `--label` (at most 40 characters, no control characters) stored on the run and shown
+   in `--status` rows, and document the status row fields (`20261104-0010`).
+7. Record the Codex `rate_limits` snapshot of the last `token_count` event in `usage.json`
+   (`20261025-1722`).
+
 ## 0.0.6 - 2026-11-07
 
 1. Name `transfer-context`, the new name of `context-transfer`, for handing state to a new session.
