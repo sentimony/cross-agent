@@ -523,12 +523,14 @@ def validate_checkpoint(meta, body, root, mode):
                 display = '[redacted]' if _secret_errors(path) else path
                 (errors if mode == 'draft' else warnings).append('missing artifact ' + display)
     positions = []
+    first = {}
+    for title, start, _ in _headings(body):
+        first.setdefault(title, start)
     for section in SECTIONS:
-        found = re.search(r'^## ' + re.escape(section) + r'\s*$', body, re.MULTILINE)
-        if not found:
+        if section not in first:
             errors.append('missing section ' + section)
         else:
-            positions.append(found.start())
+            positions.append(first[section])
     if positions != sorted(positions):
         errors.append('sections out of order')
     errors.extend(_secret_errors('---\n' + json.dumps(meta, indent=2) + '\n---\n' + body))
@@ -591,31 +593,43 @@ def _atomic_write(path, data):
             os.unlink(temp)
 
 
+_FENCE_LINE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)$')
+
+
+def _headings(text):
+    """(title, start, end) of each `## ` heading line outside fenced code blocks.
+
+    CommonMark rules: an opening fence has up to 3 spaces of indent, sets the character
+    and the length; a closing fence uses the same character, is at least as long and is
+    followed only by whitespace. A backtick fence cannot have backticks in its info string."""
+    found, fence, offset = [], None, 0
+    for line in text.split('\n'):
+        match = _FENCE_LINE.match(line)
+        if fence is None:
+            if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+                fence = match.group(1)
+            elif line.startswith('## '):
+                found.append((line[3:].strip(), offset, offset + len(line)))
+        elif (match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence)
+                and not match.group(2).strip()):
+            fence = None
+        offset += len(line) + 1
+    return found
+
+
 def _auto_fill(text, meta, facts):
     """Complete a short draft (Objective, Decisions, Failed approaches, Pending user
     decisions) to the eleven sections, from facts or `None recorded.`"""
-    head_lines, given, order, current, fence = [], {}, [], None, None
-    for line in text.split('\n'):
-        marker = re.match(r'\s{0,3}(`{3,}|~{3,})', line)
-        if marker:
-            if fence is None:
-                fence = marker.group(1)
-            elif marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
-                fence = None
-        if fence is None and not marker and line.startswith('## '):
-            title = line[3:].strip()
-            title = 'Objective and acceptance' if title == 'Objective' else title
-            if title in given:
-                raise ValidationError('duplicate section ' + title)
-            current = title
-            given[title] = []
-            order.append(title)
-        elif current is None:
-            head_lines.append(line)
-        else:
-            given[current].append(line)
-    head = '\n'.join(head_lines).rstrip('\n')
-    given = {title: '\n'.join(lines).strip('\n') for title, lines in given.items()}
+    marks = _headings(text)
+    head = text[:marks[0][1]].rstrip('\n') if marks else text.rstrip('\n')
+    given, order = {}, []
+    for index, (title, _, end) in enumerate(marks):
+        title = 'Objective and acceptance' if title == 'Objective' else title
+        if title in given:
+            raise ValidationError('duplicate section ' + title)
+        stop = marks[index + 1][1] if index + 1 < len(marks) else len(text)
+        given[title] = text[end:stop].strip('\n')
+        order.append(title)
     task = meta.get('task') if isinstance(meta.get('task'), dict) else {}
     project = facts['project']
     sessions = facts.get('delegated_sessions')

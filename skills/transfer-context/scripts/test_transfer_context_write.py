@@ -182,6 +182,30 @@ class WriteTests(unittest.TestCase):
                 self.assertIn('After.', decisions)
                 self.assertEqual(len([l for l in text.splitlines() if l.startswith('## ')]), 12)
 
+    def test_info_string_fence_line_does_not_close_a_fence(self):
+        body = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Objective', 'Failed approaches', 'Pending user decisions'))
+        body += '\n## Decisions\n\n```\nfirst\n```python\n## Hidden\nstill code\n```\nAfter.\n'
+        result = self.auto_write(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        text = Path(json.loads(result.stdout)['path']).read_text()
+        decisions = text.split('\n## Decisions\n', 1)[1].split('\n## Pending user decisions', 1)[0]
+        self.assertIn('## Hidden', decisions)
+        self.assertIn('After.', decisions)
+        self.assertNotIn('\n## Hidden', text.replace(decisions, ''))
+
+    def test_fenced_section_heading_passes_auto_and_validate(self):
+        body = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Decisions', 'Failed approaches', 'Pending user decisions'))
+        body = '\n## Objective\n\n```\n## State\nexample\n```\n' + body
+        result = self.auto_write(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        path = json.loads(result.stdout)['path']
+        check = subprocess.run([sys.executable, ct.__file__, 'validate', '--repo', str(self.repo),
+                                '--store', str(self.store), path], capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertNotIn('out of order', check.stdout + check.stderr)
+
     def test_auto_rejects_duplicate_section_titles(self):
         base = ''.join('\n## %s\n\nText.\n' % name for name in
                        ('Objective', 'Decisions', 'Failed approaches', 'Pending user decisions'))
