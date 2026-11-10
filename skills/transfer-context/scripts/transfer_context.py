@@ -594,15 +594,28 @@ def _atomic_write(path, data):
 def _auto_fill(text, meta, facts):
     """Complete a short draft (Objective, Decisions, Failed approaches, Pending user
     decisions) to the eleven sections, from facts or `None recorded.`"""
-    head, _, rest = text.partition('\n## ')
-    given, order = {}, []
-    for chunk in (('## ' + rest).split('\n## ') if rest else []):
-        chunk = chunk[3:] if chunk.startswith('## ') else chunk
-        title, _, content = chunk.partition('\n')
-        title = title.strip()
-        title = 'Objective and acceptance' if title == 'Objective' else title
-        given[title] = content.strip('\n')
-        order.append(title)
+    head_lines, given, order, current, fence = [], {}, [], None, None
+    for line in text.split('\n'):
+        marker = re.match(r'\s{0,3}(`{3,}|~{3,})', line)
+        if marker:
+            if fence is None:
+                fence = marker.group(1)
+            elif marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+                fence = None
+        if fence is None and not marker and line.startswith('## '):
+            title = line[3:].strip()
+            title = 'Objective and acceptance' if title == 'Objective' else title
+            if title in given:
+                raise ValidationError('duplicate section ' + title)
+            current = title
+            given[title] = []
+            order.append(title)
+        elif current is None:
+            head_lines.append(line)
+        else:
+            given[current].append(line)
+    head = '\n'.join(head_lines).rstrip('\n')
+    given = {title: '\n'.join(lines).strip('\n') for title, lines in given.items()}
     task = meta.get('task') if isinstance(meta.get('task'), dict) else {}
     project = facts['project']
     sessions = facts.get('delegated_sessions')
@@ -897,8 +910,8 @@ def main(argv=None):
             commands = '/transfer-context resume ' + path.stem
             codex = '$transfer-context resume ' + path.stem
             root = shlex.quote(parse_checkpoint(path.read_text(encoding='utf-8'))[0]['project']['root'])
-            terminal = 'cd %s && claude "/transfer-context resume %s"' % (root, path.stem)
-            terminal_codex = 'cd %s && codex "$transfer-context resume %s"' % (root, path.stem)
+            terminal = 'cd %s && claude %s' % (root, shlex.quote(commands))
+            terminal_codex = 'cd %s && codex %s' % (root, shlex.quote(codex))
             if getattr(args, 'json', False):
                 print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
                                   'resume_command_codex': codex, 'resume_command_terminal': terminal,

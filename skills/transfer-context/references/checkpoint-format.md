@@ -85,9 +85,10 @@ filesystem-encoded realpath. Optional `config.json` holds thresholds and
 `write --auto` accepts a draft with only `Objective`, `Decisions`, `Failed approaches`
 and `Pending user decisions` and fills the other sections from facts or `None recorded.`;
 `write` also prints `resume_command_terminal` and `resume_command_terminal_codex`
-(`cd <root> && claude "/transfer-context resume <id>"` and the `codex` form). `list`
-prints the store's checkpoints, `prune --keep <n> [--all]` removes older ones and never
-runs implicitly. Run `validate <path>` to check a completed checkpoint. Missing artifacts
-are warnings on validation and errors on write. `--budget` sets the body character
-warning threshold (default 12000). The script rejects known secret patterns; review all
-material for other secrets before writing.
+(`cd <root> && claude '/transfer-context resume <id>'` and
+`codex '$transfer-context resume <id>'`, single-quoted so the shell leaves `$` alone).
+`list` prints the store's checkpoints, `prune --keep <n> [--all]` removes older ones and
+never runs implicitly. Run `validate <path>` to check a completed checkpoint. Missing
+artifacts are warnings on validation and errors on write. `--budget` sets the body
+character warning threshold (default 12000). The script rejects known secret patterns;
+review all material for other secrets before writing.

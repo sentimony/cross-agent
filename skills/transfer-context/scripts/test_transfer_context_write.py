@@ -136,10 +136,17 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(data['resume_command'], '/transfer-context resume ' + transfer_id)
         self.assertEqual(data['resume_command_codex'], '$transfer-context resume ' + transfer_id)
         root = ct.parse_checkpoint(Path(data['path']).read_text())[0]['project']['root']
-        self.assertEqual(data['resume_command_terminal'],
-                         'cd %s && claude "/transfer-context resume %s"' % (root, transfer_id))
-        self.assertEqual(data['resume_command_terminal_codex'],
-                         'cd %s && codex "$transfer-context resume %s"' % (root, transfer_id))
+        bin_dir = Path(self.tmp.name) / 'bin'
+        bin_dir.mkdir()
+        for name in ('claude', 'codex'):
+            (bin_dir / name).write_text('#!/bin/sh\nprintf "%s" "$1"\n')
+            (bin_dir / name).chmod(0o755)
+        env = {'PATH': '%s:/usr/bin:/bin' % bin_dir}
+        for key, name, argument in (
+                ('resume_command_terminal', 'claude', '/transfer-context resume ' + transfer_id),
+                ('resume_command_terminal_codex', 'codex', '$transfer-context resume ' + transfer_id)):
+            shell = subprocess.run(['sh', '-c', data[key]], capture_output=True, text=True, env=env)
+            self.assertEqual(shell.stdout, argument, data[key])
         skill = (Path(ct.__file__).parent.parent / 'SKILL.md').read_text()
         self.assertIn('argument-hint: "[save | resume [<path|id>] | check]"', skill)
 
@@ -152,6 +159,39 @@ class WriteTests(unittest.TestCase):
         path = self.draft.with_name('short.md')
         path.write_text(head + '\n' + body)
         return path
+
+    def auto_write(self, body):
+        head = self.draft.read_text().split('\n## ', 1)[0]
+        path = self.draft.with_name('auto.md')
+        path.write_text(head + '\n' + body)
+        return subprocess.run([sys.executable, ct.__file__, 'write', '--repo', str(self.repo),
+                               '--store', str(self.store), '--auto', '--json', str(path)],
+                              capture_output=True, text=True)
+
+    def test_auto_keeps_heading_lines_inside_fenced_blocks(self):
+        for fence in ('```', '~~~'):
+            with self.subTest(fence=fence):
+                body = ''.join('\n## %s\n\nText.\n' % name for name in
+                               ('Objective', 'Failed approaches', 'Pending user decisions'))
+                body += '\n## Decisions\n\n%ssh\n## Not a section\n%s\nAfter.\n' % (fence, fence)
+                result = self.auto_write(body)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                text = Path(json.loads(result.stdout)['path']).read_text()
+                decisions = text.split('\n## Decisions\n', 1)[1].split('\n## Pending user decisions', 1)[0]
+                self.assertIn('## Not a section', decisions)
+                self.assertIn('After.', decisions)
+                self.assertEqual(len([l for l in text.splitlines() if l.startswith('## ')]), 12)
+
+    def test_auto_rejects_duplicate_section_titles(self):
+        base = ''.join('\n## %s\n\nText.\n' % name for name in
+                       ('Objective', 'Decisions', 'Failed approaches', 'Pending user decisions'))
+        for extra, title in (('\n## Decisions\n\nAgain.\n', 'Decisions'),
+                             ('\n## Objective and acceptance\n\nAgain.\n', 'Objective and acceptance')):
+            with self.subTest(title=title):
+                result = self.auto_write(base + extra)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(title, result.stdout + result.stderr)
+                self.assertIn('duplicate', (result.stdout + result.stderr).lower())
 
     def test_auto_fills_missing_sections_from_the_short_draft(self):
         command = [sys.executable, ct.__file__]
