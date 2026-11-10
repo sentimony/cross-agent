@@ -567,11 +567,18 @@ def _without_resume(body):
     return re.sub(pattern, '', body, flags=re.DOTALL)
 
 
+def _section_span(body, title):
+    """(content_start, content_end) of the first `## <title>` heading outside fences."""
+    marks = _headings(body)
+    for index, (name, _, end) in enumerate(marks):
+        if name == title:
+            return end, marks[index + 1][1] if index + 1 < len(marks) else len(body)
+    raise ValidationError('missing section ' + title)
+
+
 def _resume_body(body, path, root):
     body = _without_resume(body)
-    heading = re.search(r'^## Resume prompt\s*$', body, re.MULTILINE)
-    next_heading = re.search(r'^## ', body[heading.end():], re.MULTILINE)
-    end = heading.end() + next_heading.start() if next_heading else len(body)
+    end = _section_span(body, 'Resume prompt')[1]
     quoted = shlex.quote(str(root))
     block = (RESUME_MARKER + '\nCheckpoint: ' + str(path.resolve()) + '\n'
              + '```sh\n' + '\n'.join('git -C ' + quoted + ' ' + command for command in
@@ -601,7 +608,7 @@ def _headings(text):
 
     CommonMark rules: an opening fence has up to 3 spaces of indent, sets the character
     and the length; a closing fence uses the same character, is at least as long and is
-    followed only by whitespace. A backtick fence cannot have backticks in its info string."""
+    followed only by spaces and tabs. A backtick fence cannot have backticks in its info string."""
     found, fence, offset = [], None, 0
     for line in text.split('\n'):
         match = _FENCE_LINE.match(line)
@@ -611,7 +618,7 @@ def _headings(text):
             elif line.startswith('## '):
                 found.append((line[3:].strip(), offset, offset + len(line)))
         elif (match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence)
-                and not match.group(2).strip()):
+                and re.fullmatch(r'[ \t]*', match.group(2))):
             fence = None
         offset += len(line) + 1
     return found
@@ -920,7 +927,8 @@ def main(argv=None):
             path = write_checkpoint(args.path, args)
             store_line = store_report(path.parent, args)
             _, body = parse_checkpoint(path.read_text(encoding='utf-8'))
-            resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
+            start, stop = _section_span(body, 'Resume prompt')
+            resume = body[start:stop].strip()
             commands = '/transfer-context resume ' + path.stem
             codex = '$transfer-context resume ' + path.stem
             root = shlex.quote(parse_checkpoint(path.read_text(encoding='utf-8'))[0]['project']['root'])

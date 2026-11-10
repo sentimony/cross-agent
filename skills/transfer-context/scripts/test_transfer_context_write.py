@@ -298,6 +298,39 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(first, ct.write_checkpoint(self.draft, self.args))
         self.assertEqual(body.count(ct.RESUME_MARKER), 2)
 
+    def _write_json(self, text):
+        self.draft.write_text(text)
+        command = [sys.executable, ct.__file__, 'write', '--repo', str(self.repo),
+                   '--store', str(self.store), '--json', str(self.draft)]
+        run = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        data = json.loads(run.stdout)
+        return data, ct.parse_checkpoint(Path(data['path']).read_text())[1]
+
+    def test_fenced_resume_heading_before_real_section_is_content(self):
+        fenced = '\n```\n## Resume prompt\nFAKE\n```\n'
+        text = self.draft.read_text().replace('\n## Resume prompt', fenced + '\n## Resume prompt', 1)
+        data, body = self._write_json(text)
+        self.assertTrue(data['resume_prompt'].startswith('None.\n\n' + ct.RESUME_MARKER))
+        self.assertNotIn('FAKE', data['resume_prompt'])
+        self.assertIn(fenced, body)
+        self.assertEqual(body.count(ct.RESUME_MARKER), 2)
+        self.assertLess(body.index('FAKE'), body.index(ct.RESUME_MARKER))
+        real = body.index('\n## Resume prompt\n\nNone.')
+        self.assertLess(real, body.index(ct.RESUME_MARKER))
+        self.assertLess(body.index(ct.RESUME_MARKER), body.index('\n## Objective and acceptance'))
+
+    def test_fenced_heading_inside_resume_section_does_not_end_it(self):
+        text = self.draft.read_text().replace(
+            '## Resume prompt\n\nNone.\n', '## Resume prompt\n\nGo.\n```\n## X\n```\nDone.\n', 1)
+        data, body = self._write_json(text)
+        self.assertTrue(data['resume_prompt'].startswith('Go.\n```\n## X\n```\nDone.\n\n' + ct.RESUME_MARKER))
+        self.assertLess(body.index('Done.'), body.index(ct.RESUME_MARKER))
+
+    def test_nbsp_after_closing_fence_does_not_close_block(self):
+        text = '```\n## Hidden\n```\u00a0\n## Hidden\n```\n## Real\n'
+        self.assertEqual([title for title, _, _ in ct._headings(text)], ['Real'])
+
     def test_symlink_store_is_rejected(self):
         target = Path(self.tmp.name) / 'target'
         target.mkdir()
