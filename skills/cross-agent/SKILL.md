@@ -48,7 +48,16 @@ The host owns permissions, task classification, installed sources and session id
      [--config <agents-json>] 'claude opus low [assignment]'
    ```
 
-   For a file containing the full UTF-8 brief, pass selectors separately:
+   To run an installed skill, put its name first in the brackets, then its brief:
+
+   ```text
+   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
+     'claude opus low [<skill> $(cat brief.txt)]'
+   ```
+
+   A brief with literal brackets, or one that does not start with an installed skill
+   name, goes through `--assignment-file` instead of the brackets. For a file containing
+   the full UTF-8 brief, pass selectors separately:
 
    ```text
    python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \

@@ -18,6 +18,9 @@ class SkillContextTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):load_skill_context('missing',self.installed)
         (self.root/'references/facts.txt').unlink()
         with self.assertRaises(ProtocolError):load_skill_context('fixture',self.installed)
+    def test_unknown_skill_names_word_and_allowed(self):
+        with self.assertRaises(ProtocolError) as ctx:load_skill_context('Task',self.installed)
+        self.assertIn('Task',str(ctx.exception));self.assertIn('fixture',str(ctx.exception))
     def test_escape_and_symlink_denied(self):
         for path in ('../outside','/etc/passwd'):
             self.installed['fixture']['resources']=[path]

@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,6 +34,11 @@ class RequestTests(unittest.TestCase):
                      '[a] --task x --task y', '[a] codex low sol'):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 r.parse_request(text)
+        for text in ('[a] [b]', 'claude opus low ]', 'claude opus low []'):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, re.escape(r.FORM_HINT)):
+                r.parse_request(text)
+        with self.assertRaisesRegex(ValueError, re.escape(r.FORM_HINT)):
+            r.parse_request('claude opus low [a]', 'brief from file')
 
     def test_flags_outside(self):
         req = r.parse_request('--task task-1 [skill --new --auto] --session session-1 codex')
