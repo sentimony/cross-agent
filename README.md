@@ -17,7 +17,6 @@ Version: `v0.0.6`
 | --- | --- | --- | --- |
 | [cross-agent](skills/cross-agent/SKILL.md) | 0.0.6 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
 | [transfer-context](skills/transfer-context/SKILL.md) | 0.0.5 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
-| [context-transfer](skills/context-transfer/SKILL.md) | - | - | Migration notice for the renamed `transfer-context` skill. |
 
 ## Overview
 

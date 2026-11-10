@@ -3,10 +3,9 @@
 ## 0.0.5 - 2026-11-07
 
 1. Rename `context-transfer` to `transfer-context`; invoke `/transfer-context` (`$transfer-context` in Codex)
-   and run `scripts/transfer_context.py`. The `context-transfer` package remains as a migration notice.
-   The store `~/.sentimony/cross-agent/context-transfer/`, `CONTEXT_TRANSFER_DIR` and the
+   and run `scripts/transfer_context.py`. Only the name and its mentions changed. The store
+   `~/.sentimony/cross-agent/context-transfer/`, `CONTEXT_TRANSFER_DIR` and the
    `context-transfer:resume-check` marker keep their names.
-2. Add `references/migration.md`: what changed, what stays, and the steps for installed hooks and links.
 
 ## 0.0.4 - 2026-11-07
 

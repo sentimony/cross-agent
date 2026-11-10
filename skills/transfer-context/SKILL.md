@@ -13,8 +13,7 @@ compatibility: Python 3.9+
 Save the current work for a later session, resume a checkpoint, or check context usage.
 The default command is `save`; also use `resume [<path|id>]` or `check`. Run
 `scripts/transfer_context.py` with Python 3.9 or newer. See [installation](references/install.md),
-[checkpoint format](references/checkpoint-format.md), optional [hooks](references/hooks.md),
-and [migration from context-transfer](references/migration.md).
+[checkpoint format](references/checkpoint-format.md), and optional [hooks](references/hooks.md).
 
 ## Save
 
