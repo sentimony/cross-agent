@@ -19,6 +19,12 @@ scanner counts brackets before tokenizing outer arguments; quotation marks insid
 an assignment are ordinary data. Escape a literal unmatched bracket with a backslash.
 Outer tokens use `shlex.split` with no shell execution or variable expansion.
 
+The optional host JSON field `required_roots` is a list of absolute directory paths that
+the task must read. The launcher returns `UNAVAILABLE` with the reason `read-only profile
+cannot read: <root>` before starting a Claude Code read-only process when a root lies
+outside `workspace`, because that profile reads only its working directory; any other
+value is rejected as `BLOCKED`. Omit the field for no check.
+
 For arbitrary UTF-8 text, use the launcher option `--assignment-file <path>` and
 supply selectors and outer flags in the request string, for example:
 

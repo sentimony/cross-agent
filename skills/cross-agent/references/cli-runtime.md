@@ -62,3 +62,16 @@
    is null without a transcript; the exact launcher figures in `usage.json` are separate.
 5. Native profile, actual provider identity, credits and billing require separate approved
    checks. Fake CLI tests prove process plumbing only; requested argv is not actual identity.
+6. Profile capabilities. "verified" marks a claim backed by a repository test or by an
+   observation recorded in `CHANGELOG.md`; "not verified" marks a claim that rests only on
+   the flags the launcher sets (checked against fake CLIs) or on no check at all.
+
+   | Profile | Read workspace | Read outside workspace | Write | Network |
+   | --- | --- | --- | --- | --- |
+   | Codex `read-only` | not verified (`-s read-only`) | not verified | none by flag, not verified | not verified |
+   | Codex `execution` | verified (observed run, local tests) | not verified | workspace only, verified; `.git` denied, verified | none, verified (observed run) |
+   | Claude Code `read-only` | not verified (`Read,Grep,Glob` only) | refused before launch for `required_roots`, verified by test; CLI boundary not verified | no write tool by flag, not verified | no web or MCP tool by flag, not verified |
+   | Claude Code `execution` | not verified | not verified | workspace tools by flag, not verified | web and MCP tools denied by flag, not verified |
+
+   `required_roots` in the host JSON (see [configuration.md](configuration.md)) is checked
+   against the Claude Code read-only profile before any process starts.

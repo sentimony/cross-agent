@@ -38,6 +38,8 @@ The host owns permissions, task classification, installed sources and session id
    [cli-runtime.md](references/cli-runtime.md)): give it only file edits and local test
    runs. A task that needs network, dependency installation or commits goes to a Claude
    Code executor under the `orchestrate` host policy.
+7. When the task must read paths outside `workspace`, list them in `required_roots`: a
+   Claude Code read-only run is refused before launch if any is outside the workspace.
 
 ## Dispatch and continue
 

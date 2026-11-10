@@ -68,6 +68,61 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         return [sys.executable, str(Path(__file__).with_name('cross_agent.py')),
                 '--host-context', str(host), '--config', str(config)]
 
+    def run_claude_read_only(self, required_roots):
+        import subprocess, sys
+        fake = self.bin / 'claude'
+        fake.write_text('#!/usr/bin/env python3\nfrom pathlib import Path\nPath(%r).write_text("launched")\n'
+                        % str(self.root / 'launched'))
+        fake.chmod(0o700)
+        config = self.root / 'claude-config.json'
+        config.write_text(json.dumps({'schema_version': 1, 'agents': {'claude-code': {
+            'models': {'claude-opus-5-5': ['low']}, 'default_model': 'claude-opus-5-5',
+            'default_effort': 'low', 'profiles': ['read-only'],
+            'capabilities': {'read-only': 'supported'}}}}))
+        document = {'task_context': {'registry_path': str(self.root / 'registry'),
+                                     'repo': str(self.root), 'conversation_id': 'conversation'},
+                    'role': 'consultation', 'profile': 'read-only', 'host_family': 'codex',
+                    'workspace': str(self.root), 'artifact_root': str(self.root / 'artifacts'),
+                    'target_identity': {'tree': 'snapshot'},
+                    'environment': {'PATH': str(self.bin), 'HOME': str(self.root)}, 'timeout_seconds': 2}
+        if required_roots is not None:
+            document['required_roots'] = required_roots
+        host = self.root / 'claude-host.json'
+        host.write_text(json.dumps(document))
+        assignment = self.root / 'assignment.txt'
+        assignment.write_text('question')
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name('cross_agent.py')),
+                                 '--host-context', str(host), '--config', str(config),
+                                 '--assignment-file', str(assignment), 'claude'],
+                                capture_output=True, text=True)
+        return result, json.loads(result.stdout)
+
+    def test_required_root_outside_workspace_blocks_claude_read_only_before_launch(self):
+        outside = Path(tempfile.mkdtemp(dir=str(self.root.parent)))
+        self.addCleanup(outside.rmdir)
+        result, document = self.run_claude_read_only([str(outside)])
+        entry = document['results'][0]
+        self.assertEqual(entry['status'], 'UNAVAILABLE', result.stdout + result.stderr)
+        self.assertEqual(entry['reason'], 'read-only profile cannot read: ' + str(outside))
+        self.assertFalse((self.root / 'launched').exists())
+
+    def test_required_root_inside_workspace_or_absent_launches_as_before(self):
+        (self.root / 'sub').mkdir()
+        for roots in ([str(self.root / 'sub')], None):
+            with self.subTest(roots=roots):
+                (self.root / 'launched').unlink(missing_ok=True)
+                __import__('shutil').rmtree(self.root / 'registry', ignore_errors=True)
+                result, document = self.run_claude_read_only(roots)
+                self.assertNotIn('cannot read', document['results'][0].get('reason', ''))
+                self.assertTrue((self.root / 'launched').exists(), result.stdout)
+
+    def test_required_roots_must_be_absolute_strings(self):
+        for bad in ('relative', ['relative'], [1]):
+            with self.subTest(bad=bad):
+                result, document = self.run_claude_read_only(bad)
+                self.assertEqual(document['status'], 'BLOCKED', result.stdout)
+                self.assertIn('required_roots', document['reason'])
+
     def test_temp_warnings_unit(self):
         import cross_agent as ca
         roots = (Path('/scratch-tmp'),)

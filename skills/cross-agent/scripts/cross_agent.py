@@ -47,6 +47,7 @@ class HostContext:
     owner_context: dict = field(default_factory=dict)
     skill_context: object = None
     prior_dispositions: object = None
+    required_roots: tuple = ()
 
 
 @dataclass
@@ -471,6 +472,12 @@ def dispatch(request, host_context):
                 single = replace(single, task_selector=result.task_id)
             if isinstance(agent, UnavailableError):
                 raise agent
+            if agent.family == 'claude-code' and agent.profile == 'read-only':
+                # The restricted Claude child reads only its working directory.
+                workspace = Path(host.workspace).resolve()
+                for root in host.required_roots:
+                    if not Path(root).resolve().is_relative_to(workspace):
+                        raise UnavailableError('read-only profile cannot read: ' + root)
             decision = select_session(single, host.task_context, agent, agent.role, agent.profile)
             entry.update(task_id=decision.task_id, session_id=decision.session_id,
                          role=decision.role, profile=decision.profile, selection_reason=decision.reason)
@@ -871,6 +878,13 @@ def main(argv=None):
         raw['policy'] = transport.VerifiedProfilePolicy(**policy)
     if 'pass_env' in raw:
         raw['pass_env'] = tuple(transport.validate_pass_env(raw['pass_env']))
+    roots = raw.get('required_roots', [])
+    if (not isinstance(roots, list)
+            or any(not isinstance(p, str) or not os.path.isabs(p) for p in roots)):
+        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
+                          'reason': 'required_roots must be a list of absolute path strings'}))
+        return 2
+    raw['required_roots'] = tuple(roots)
     host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
                        task_context=task, **raw)
     if args.status:
