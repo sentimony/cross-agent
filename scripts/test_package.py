@@ -7,14 +7,14 @@ HIDDEN_PATHS = ('.claude-plugin/plugin.json', '.codex-plugin/plugin.json', '.ant
 class PackageTests(unittest.TestCase):
     def test_one_root_skill_and_manifest_identity(self):
         root=json.loads((ROOT/'plugin.json').read_text())
-        self.assertEqual((root['name'],root['version']),('cross-agent','0.0.6'))
+        self.assertEqual((root['name'],root['version']),('cross-agent','0.0.7'))
         self.assertEqual(root['skills'],'./skills/')
         self.assertEqual(root['$schema'],'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json')
         self.assertTrue(root['extensions']['com.openai']['interface'])
         for name in HIDDEN_PATHS:
             if name in KEPT_HIDDEN:
                 doc=json.loads((ROOT/name).read_text())
-                self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.6'))
+                self.assertEqual((doc['name'],doc['version']),('cross-agent','0.0.7'))
             else:
                 self.assertFalse((ROOT/name).exists(),name)
         self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent', 'transfer-context'])
@@ -24,7 +24,7 @@ class PackageTests(unittest.TestCase):
         for name in renamed:
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.5')):
+        for name, version in (('cross-agent', '0.0.6'), ('transfer-context', '0.0.6')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])

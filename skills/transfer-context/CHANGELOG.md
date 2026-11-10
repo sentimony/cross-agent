@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.6 - 2026-11-10
+
+1. Add `references/migration.md`: what changed in the rename from `context-transfer`, what
+   stays, and the steps for installed hooks and links.
+
 ## 0.0.5 - 2026-11-07
 
 1. Rename `context-transfer` to `transfer-context`; invoke `/transfer-context` (`$transfer-context` in Codex)

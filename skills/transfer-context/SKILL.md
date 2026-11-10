@@ -3,7 +3,7 @@ name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint.
 argument-hint: "[save | resume [<path|id>] | check | list | validate <path> | prune --keep <n>]"
 metadata:
-  version: "0.0.5"
+  version: "0.0.6"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -13,7 +13,8 @@ compatibility: Python 3.9+
 Save the current work for a later session, resume a checkpoint, or check context usage.
 The default command is `save`; also use `resume [<path|id>]` or `check`. Run
 `scripts/transfer_context.py` with Python 3.9 or newer. See [installation](references/install.md),
-[checkpoint format](references/checkpoint-format.md), and optional [hooks](references/hooks.md).
+[checkpoint format](references/checkpoint-format.md), optional [hooks](references/hooks.md),
+and [migration from context-transfer](references/migration.md).
 
 ## Save
 
