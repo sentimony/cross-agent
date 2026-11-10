@@ -30,12 +30,14 @@ Version: `v0.0.7`
 4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
    work across sessions with a verifiable checkpoint.
 5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
-   `.antigravity-plugin/`). Claude Code 2.1.322 does accept a root `plugin.json`; the empty
-   plugin seen earlier came from the marketplace's `git-subdir` source with `path: "."`,
-   which installs only top-level files, and the marketplace will pin Claude Code entries
-   with a `url` source. The 2026-11-07 host checks (Claude Code 2.1.319, Codex 0.166.0,
-   Antigravity 1.5.2) covered the previous root-manifest layout; host install checks of
-   the three-manifest layout are still pending and run at the PR stage.
+   `.antigravity-plugin/`). Claude Code 2.1.322 does accept a root `plugin.json`; the
+   empty plugin seen earlier came from the marketplace's `git-subdir` source with
+   `path: "."`, which installs only top-level files, and the marketplace will pin Claude
+   Code entries with a `url` source. The 2026-11-07 host checks (Claude Code 2.1.319,
+   Codex 0.166.0, Antigravity 1.5.2) covered the previous root-manifest layout. On
+   2026-11-10 the three-manifest layout installed from the branch with Claude Code
+   2.1.322 and Codex 0.167.0 (both skills at 0.0.7); invocation and Antigravity are not
+   checked.
 
 ## Install
 
@@ -76,7 +78,7 @@ environment and no reachable native agent CLI. Fixture tests exercise public cod
 | Generic parser/session/protocol/resources | Credential-free unit and fake-CLI checks |
 | Registry installation-root move | Synthetic public-module relocation fixture |
 | Owner integration | Requires the separately supplied, compatible installed owner adapter |
-| Native host installation and skill invocation | History, previous root-manifest layout (2026-11-07); three-manifest layout pending: Claude Code install PASS, invocation PASS; Codex install PASS, invocation PASS; Antigravity install PASS, invocation PASS |
+| Native host installation and skill invocation | Three-manifest layout, 2026-11-10, `url` source from the branch: Claude Code 2.1.322 and Codex 0.167.0 install PASS (both skills at 0.0.7), invocation not checked; Antigravity not checked. Previous root-manifest layout, 2026-11-07: Claude Code, Codex and Antigravity install and invocation PASS |
 | Provider resume / release pair | Unverified; separate approval and evidence required |
 
 The delegation runtime creates no remote repositories, installs, logins or releases.
