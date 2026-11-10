@@ -63,6 +63,22 @@ class ClaudeOrchestratorProfile(unittest.TestCase):
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits')
         self.assertEqual(argv[-2:], ['--resume', SESSION])
 
+    def test_incomplete_evidence_names_missing_fields(self):
+        def with_evidence(fresh, resume):
+            return transport.VerifiedProfilePolicy('claude-code', str(self.repo), fresh, resume,
+                                                   ('read', 'write-workspace', 'orchestrate'), True, False)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('', 'owner attested'))
+        self.assertIn('missing_fields: ["fresh_evidence"]', caught.exception.message)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('', ''), transport.build_resume_command)
+        self.assertIn('missing_fields: ["fresh_evidence", "resume_evidence"]', caught.exception.message)
+        with self.assertRaises(transport.CrossReviewError) as caught:
+            self.build(with_evidence('owner attested', ''), transport.build_resume_command)
+        self.assertIn('missing_fields: ["resume_evidence"]', caught.exception.message)
+        self.build(with_evidence('owner attested', 'owner attested'), transport.build_resume_command)
+        self.build(with_evidence('owner attested', ''))
+
     def test_claude_execution_needs_explicit_orchestrate_action(self):
         for pol in (policy(self.repo, actions=('read', 'write-workspace')),
                     policy(self.repo, delegation_blocked=False),
