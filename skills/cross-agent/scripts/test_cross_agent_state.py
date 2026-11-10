@@ -65,6 +65,26 @@ class SnapshotReadTests(unittest.TestCase):
         with self.assertRaisesRegex(StateError, 'UNSAFE_REGISTRY_PATH'):
             read_registry(self.ctx)
 
+    def test_snapshot_unsafe_mode_names_path_label_and_mode(self):
+        import re
+        from cross_agent_state import read_registry
+        (self.dir / 'registry.json').chmod(0o644)
+        pattern = 'UNSAFE_REGISTRY_PATH: registry file ' + re.escape(str(self.dir / 'registry.json')) \
+            + ' mode 644, expected 600'
+        with self.assertRaisesRegex(StateError, pattern):
+            read_registry(self.ctx)
+
+    def test_owner_mismatch_names_both_uids(self):
+        import re
+        from unittest.mock import patch
+        from cross_agent_state import read_registry
+        uid = os.getuid()
+        pattern = 'UNSAFE_REGISTRY_PATH: registry_path ' + re.escape(str(self.dir)) \
+            + ' owner uid %d, expected uid %d' % (uid, uid + 1)
+        with patch('cross_agent_state.os.getuid', return_value=uid + 1):
+            with self.assertRaisesRegex(StateError, pattern):
+                read_registry(self.ctx)
+
 
 class StateTests(unittest.TestCase):
     def setUp(self):

@@ -14,11 +14,14 @@
    which a reboot clears; nothing then lands in the project tree. The launcher does not
    choose these paths. Both are directories: `registry_path` holds `registry.json` and
    `registry.lock`, and `artifact_root` holds one folder per run. Create both with
-   `mkdir -m 700` (the parents must already exist). The launcher answers
+   `mkdir -m 700` (the parents must already exist), for example
+   `mkdir -m 700 <registry_path>`. The launcher answers
    `UNSAFE_REGISTRY_PATH: <label> <path> mode <mode>, expected 700` (or `600` for
-   `registry.json`, or `owner uid <n>, expected uid <m>`) for a registry directory or file
-   that another user owns or that group or others can access; fix it with `chmod 700
-   <registry_path>`, and `unsafe run root (mode 755, expected 700)` for an
+   `registry.json` and `registry.lock`) for a registry directory or file that group or
+   others can access: run `chmod 700 <dir>` for the directory, `chmod 600 <file>` for a
+   file. For `owner uid <n>, expected uid <m>` chmod does not help: the path must belong to
+   the current user, so fix its ownership or choose another registry root. The launcher
+   also answers `unsafe run root (mode 755, expected 700)` for an
    `artifact_root` whose mode is not exactly 700. Keep the parent directories under
    `~/.sentimony` closed to group and others too; the launcher does not check their mode.
    Minimal read-only consultation host JSON (`policy`, `answer` and `owner_context` are
