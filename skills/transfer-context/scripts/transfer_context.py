@@ -591,11 +591,49 @@ def _atomic_write(path, data):
             os.unlink(temp)
 
 
+def _auto_fill(text, meta, facts):
+    """Complete a short draft (Objective, Decisions, Failed approaches, Pending user
+    decisions) to the eleven sections, from facts or `None recorded.`"""
+    head, _, rest = text.partition('\n## ')
+    given, order = {}, []
+    for chunk in (('## ' + rest).split('\n## ') if rest else []):
+        chunk = chunk[3:] if chunk.startswith('## ') else chunk
+        title, _, content = chunk.partition('\n')
+        title = title.strip()
+        title = 'Objective and acceptance' if title == 'Objective' else title
+        given[title] = content.strip('\n')
+        order.append(title)
+    task = meta.get('task') if isinstance(meta.get('task'), dict) else {}
+    project = facts['project']
+    sessions = facts.get('delegated_sessions')
+    verification = meta.get('verification') if isinstance(meta.get('verification'), dict) else {}
+    derived = {
+        'Resume prompt': ('Continue: %s. Next: %s.' % (task['objective'], task['next_action'])
+                          if task.get('objective') and task.get('next_action') else None),
+        'State': 'Branch %s at %s; %d modified, %d untracked.' % (
+            project.get('branch') or 'none', (project.get('head') or 'none')[:12],
+            len(project.get('dirty', [])), len(project.get('untracked', []))),
+        'Running now': ('\n'.join('- %s %s: %s' % (s.get('family'), s.get('session_id'), s.get('state'))
+                                 for s in sessions) if isinstance(sessions, list) and sessions else None),
+        'Verification': ('Status: %s.' % verification['status'] if verification.get('status') else None),
+        'Next actions': task.get('next_action') or None,
+    }
+    parts = []
+    for section in SECTIONS:
+        content = given.get(section) or derived.get(section) or 'None recorded.'
+        parts.append('## ' + section + '\n\n' + content + '\n')
+    parts += ['## ' + title + '\n\n' + given[title] + '\n' for title in order if title not in SECTIONS]
+    return head + '\n' + '\n'.join(parts)
+
+
 def write_checkpoint(draft_path, args):
     text = Path(draft_path).read_text(encoding='utf-8')
     meta, body = parse_checkpoint(text)
     facts = collect_facts(args.repo, getattr(args, 'host_context', None))
     project = facts['project']
+    if getattr(args, 'auto', False):
+        text = _auto_fill(text, meta, facts)
+        meta, body = parse_checkpoint(text)
     errors, warnings = validate_checkpoint(meta, body, project['root'], 'draft')
     errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(text)
     if errors:
@@ -822,6 +860,8 @@ def main(argv=None):
             sub.add_argument('--statusline', action='store_true')
             for option in ('transcript', 'rollout', 'prepare', 'refresh', 'rotate'):
                 sub.add_argument('--' + option)
+        if name == 'write':
+            sub.add_argument('--auto', action='store_true')
         if name in ('write', 'validate'):
             sub.add_argument('--budget', type=int, default=12000)
             sub.add_argument('path')
@@ -856,11 +896,16 @@ def main(argv=None):
             resume = body.split('## Resume prompt', 1)[1].split('## ', 1)[0].strip()
             commands = '/transfer-context resume ' + path.stem
             codex = '$transfer-context resume ' + path.stem
+            root = shlex.quote(parse_checkpoint(path.read_text(encoding='utf-8'))[0]['project']['root'])
+            terminal = 'cd %s && claude "/transfer-context resume %s"' % (root, path.stem)
+            terminal_codex = 'cd %s && codex "$transfer-context resume %s"' % (root, path.stem)
             if getattr(args, 'json', False):
                 print(json.dumps({'path': str(path), 'resume_prompt': resume, 'resume_command': commands,
-                                  'resume_command_codex': codex, 'store': store_line}))
+                                  'resume_command_codex': codex, 'resume_command_terminal': terminal,
+                                  'resume_command_terminal_codex': terminal_codex, 'store': store_line}))
             else:
-                print(str(path) + '\nstore: ' + store_line + '\n' + resume + '\n' + commands + '\n' + codex)
+                print(str(path) + '\nstore: ' + store_line + '\n' + resume + '\n' + commands + '\n' + codex
+                      + '\n' + terminal + '\n' + terminal_codex)
             return 0
         if args.command == 'validate':
             raw = Path(args.path).read_text(encoding='utf-8')

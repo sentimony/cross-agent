@@ -135,8 +135,40 @@ class WriteTests(unittest.TestCase):
         transfer_id = Path(data['path']).stem
         self.assertEqual(data['resume_command'], '/transfer-context resume ' + transfer_id)
         self.assertEqual(data['resume_command_codex'], '$transfer-context resume ' + transfer_id)
+        root = ct.parse_checkpoint(Path(data['path']).read_text())[0]['project']['root']
+        self.assertEqual(data['resume_command_terminal'],
+                         'cd %s && claude "/transfer-context resume %s"' % (root, transfer_id))
+        self.assertEqual(data['resume_command_terminal_codex'],
+                         'cd %s && codex "$transfer-context resume %s"' % (root, transfer_id))
         skill = (Path(ct.__file__).parent.parent / 'SKILL.md').read_text()
-        self.assertIn('argument-hint: "[save | resume [<path|id>]', skill)
+        self.assertIn('argument-hint: "[save | resume [<path|id>] | check]"', skill)
+
+    def short_draft(self):
+        import re
+        text = self.draft.read_text()
+        head = text.split('\n## ', 1)[0]
+        body = ''.join('\n## %s\n\nSomething.\n' % name for name in
+                       ('Objective', 'Decisions', 'Failed approaches', 'Pending user decisions'))
+        path = self.draft.with_name('short.md')
+        path.write_text(head + '\n' + body)
+        return path
+
+    def test_auto_fills_missing_sections_from_the_short_draft(self):
+        command = [sys.executable, ct.__file__]
+        args = ['--repo', str(self.repo), '--store', str(self.store)]
+        short = self.short_draft()
+        plain = subprocess.run(command + ['write', *args, '--json', str(short)], capture_output=True, text=True)
+        self.assertNotEqual(plain.returncode, 0)
+        auto = subprocess.run(command + ['write', *args, '--auto', '--json', str(short)],
+                              capture_output=True, text=True)
+        self.assertEqual(auto.returncode, 0, auto.stdout + auto.stderr)
+        path = json.loads(auto.stdout)['path']
+        check = subprocess.run(command + ['validate', *args, path], capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        body = Path(path).read_text()
+        self.assertEqual(len([line for line in body.splitlines() if line.startswith('## ')]), 11)
+        self.assertIn('None recorded.', body)
+        self.assertIn('Something.', body)
 
     def test_secret_artifact_diagnostics_do_not_echo(self):
         secret = 'ghp_EXAMPLEVALUE'
