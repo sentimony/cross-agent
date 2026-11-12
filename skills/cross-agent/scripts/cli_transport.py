@@ -57,6 +57,8 @@ from pathlib import Path
 
 from typing import Mapping, Optional
 
+from cross_agent_profiles import canonical_profile
+
 
 DEPTH_VAR = "CROSS_REVIEW_DEPTH"
 
@@ -173,13 +175,26 @@ _CLAUDE_EXEC_POLICY = (
 )
 
 
+_CLAUDE_FULL_TOOLS = _CLAUDE_EXEC_TOOLS + ",WebFetch,WebSearch"
+
+
+# Full profile for a delegated Claude Code orchestrator: the no-network tools plus web
+# tools. MCP servers stay denied; Bash is not sandboxed, so this is cooperative.
+_CLAUDE_FULL_POLICY = (
+    "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+    "--tools", _CLAUDE_FULL_TOOLS,
+    "--allowedTools", _CLAUDE_FULL_TOOLS,
+    "--disallowedTools", "mcp__*",
+    "--strict-mcp-config",
+    "--setting-sources", "user,project,local",
+)
+
+
 _AGY_POLICY = ("--disable-slash-commands", "--print-timeout", "0")
 
 
-_CODEX_RUN_SANDBOX = ("-s", "read-only")
-
-
-_CODEX_RESUME_SANDBOX = ("-c", 'sandbox_mode="read-only"')
+_CODEX_SANDBOX = {"read-only": "read-only", "no-network": "workspace-write",
+                  "full": "danger-full-access"}
 
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -232,18 +247,30 @@ class ProfileContext:
     policy: Optional[VerifiedProfilePolicy] = None
 
 
+def _canonical(profile):
+    try:
+        return canonical_profile(profile)
+    except ValueError as exc:
+        raise CrossReviewError(EXIT_INVALID_INPUT, "UNAVAILABLE: unsupported profile") from exc
+
+
 def _profile_policy(reviewer, repo, profile, context, resume=False):
-    if profile not in ("read-only", "execution"):
-        raise CrossReviewError(EXIT_INVALID_INPUT, "UNAVAILABLE: unsupported profile")
+    profile = _canonical(profile)
+    if reviewer == "antigravity" and profile != "read-only":
+        raise CrossReviewError(EXIT_INVALID_INPUT, "UNAVAILABLE: Antigravity has no verified writer profile")
     if context is not None:
         if not isinstance(context, ProfileContext):
             raise CrossReviewError(EXIT_INVALID_INPUT, "invalid trusted profile context")
         for name in ("task_id", "parent_id"):
             _require_text(name, getattr(context, name))
         roles = ("consultation", "review") if profile == "read-only" else ("execution",)
-        if context.profile != profile or context.role not in roles:
+        if _canonical(context.profile) != profile or context.role not in roles:
             raise CrossReviewError(EXIT_INVALID_INPUT, "role/profile mismatch")
     if profile == "read-only":
+        return
+    if profile == "full":
+        if context is None:
+            raise CrossReviewError(EXIT_INVALID_INPUT, "UNAVAILABLE: full needs trusted dispatch context")
         return
     policy = context.policy if context else None
     # codex executes with isolated config; claude-code executes only as an attested
@@ -347,7 +374,7 @@ def reviewer_environment(env: Mapping[str, str], reviewer: str = "codex",
         child.update({"CROSS_AGENT_TASK_ID": context.task_id,
                       "CROSS_AGENT_PARENT_ID": context.parent_id,
                       "CROSS_AGENT_ROLE": context.role,
-                      "CROSS_AGENT_PROFILE": context.profile})
+                      "CROSS_AGENT_PROFILE": _canonical(context.profile)})
     return child
 
 
@@ -531,6 +558,7 @@ def build_run_command(reviewer: str, repo: Path, run_dir: Path,
     from repo.
     """
     _validate_common(reviewer, model, effort)
+    profile = _canonical(profile)
     _profile_policy(reviewer, repo, profile, context, resume=False)
     if not Path(repo).is_dir():
         raise CrossReviewError(EXIT_INVALID_INPUT, "repo is not a directory: %s" % repo)
@@ -540,7 +568,7 @@ def build_run_command(reviewer: str, repo: Path, run_dir: Path,
     if reviewer == "codex":
         if untrusted is None:
             untrusted = codex_untrusted_paths(repo)
-        return (["codex", "exec", "--json"] + (list(_CODEX_RUN_SANDBOX) if profile == "read-only" else ["-s", "workspace-write"])
+        return (["codex", "exec", "--json"] + ["-s", _CODEX_SANDBOX[profile]]
                 + ["-m", model, "-c", 'model_reasoning_effort="%s"' % effort,
                    "-c", _codex_untrusted_override(untrusted),
                    "-C", str(repo), "-o", str(Path(run_dir) / "review.md"), "-"])
@@ -563,6 +591,7 @@ def build_resume_command(reviewer: str, repo: Path, run_dir: Path,
     in build_run_command.
     """
     _validate_common(reviewer, model, effort)
+    profile = _canonical(profile)
     _profile_policy(reviewer, repo, profile, context, resume=True)
     if not _is_uuid(session_id):
         raise CrossReviewError(EXIT_NO_SESSION, "session id is missing or not a UUID")
@@ -574,7 +603,7 @@ def build_resume_command(reviewer: str, repo: Path, run_dir: Path,
             untrusted = codex_untrusted_paths(repo)
         return (["codex", "exec", "resume", "--json", "-m", model,
                  "-c", 'model_reasoning_effort="%s"' % effort]
-                + (list(_CODEX_RESUME_SANDBOX) if profile == "read-only" else ["-c", 'sandbox_mode="workspace-write"'])
+                + ["-c", 'sandbox_mode="%s"' % _CODEX_SANDBOX[profile]]
                 + ["-c", _codex_untrusted_override(untrusted)]
                 + ["-o", str(Path(run_dir) / "review.md"), session_id, "-"])
 
@@ -584,7 +613,8 @@ def build_resume_command(reviewer: str, repo: Path, run_dir: Path,
 
 
 def _claude_policy(profile: str) -> tuple:
-    return _CLAUDE_EXEC_POLICY if profile == "execution" else _CLAUDE_POLICY
+    return {"read-only": _CLAUDE_POLICY, "no-network": _CLAUDE_EXEC_POLICY,
+            "full": _CLAUDE_FULL_POLICY}[_canonical(profile)]
 
 
 def _agy_command(model: str, effort: str) -> list:
@@ -938,7 +968,7 @@ def build_usage(reviewer: str, model: str, effort: str, tokens, cost_usd, skills
             cost_usd = claude_cost(model, tokens)
             basis = "price-table" if cost_usd is not None else "unknown"
         skills = []
-        note = "not detected" if profile == "execution" else "disabled by policy"
+        note = "disabled by policy" if _canonical(profile) == "read-only" else "not detected"
     return {
         "schema_version": USAGE_SCHEMA_VERSION,
         "reviewer": reviewer,

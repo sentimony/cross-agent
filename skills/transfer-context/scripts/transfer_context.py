@@ -749,7 +749,8 @@ def resume_check(target, args):
     current = _project(args.repo)
     store = resolve_store(args)
     result = {'verdict': None, 'transfer_id': None, 'path': None,
-              'drift': [], 'missing': [], 'candidates': [], 'unverified': []}
+              'drift': [], 'missing': [], 'candidates': [], 'unverified': [],
+              'resumed_from_other_worktree': None}
     if target:
         name = str(target)
         path = store / (name + '.md') if re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', name) else Path(name).expanduser().absolute()
@@ -787,33 +788,47 @@ def resume_check(target, args):
     if not same:
         result['verdict'] = 'blocked'
         return result
+    compare = current
+    saved_tree = old.get('worktree')
+    if (isinstance(saved_tree, str) and saved_tree
+            and Path(saved_tree).resolve() != Path(current['worktree']).resolve()):
+        result['resumed_from_other_worktree'] = saved_tree
+        other = _project(saved_tree) if Path(saved_tree).is_dir() else None
+        if (other is None or not other['git_common_dir'] or not old_common
+                or Path(other['git_common_dir']).resolve() != Path(old_common).resolve()
+                or Path(other['worktree']).resolve() != Path(saved_tree).resolve()):
+            result['drift'].append({'kind': 'worktree-removed', 'detail': {'saved': saved_tree}})
+            result['unverified'].append('artifacts')
+            result['verdict'] = 'drifted'
+            return result
+        compare = other
     drift = result['drift']
     for key in ('branch', 'head'):
-        if old[key] != current[key]:
-            drift.append({'kind': key, 'detail': {'saved': old[key], 'current': current[key]}})
+        if old[key] != compare[key]:
+            drift.append({'kind': key, 'detail': {'saved': old[key], 'current': compare[key]}})
     for key, kind in (('worktrees', 'worktrees'), ('default_branch', 'default-branch'),
                       ('default_branch_head', 'default-branch-ref'), ('origin_ref_head', 'origin-ref')):
-        saved, now = old.get(key), current.get(key)
+        saved, now = old.get(key), compare.get(key)
         if saved is None or now is None:
             result['unverified'].append(key)
         if saved is not None and saved != now:
             drift.append({'kind': kind, 'detail': {'saved': saved, 'current': now}})
     old_paths = set(old['dirty']) | set(old['untracked'])
-    new_paths = set(current['dirty']) | set(current['untracked'])
+    new_paths = set(compare['dirty']) | set(compare['untracked'])
     if old_paths != new_paths:
         drift.append({'kind': 'dirty-set', 'detail': {'saved': sorted(old_paths), 'current': sorted(new_paths)}})
-    has_saved_head = old['head'] and _git(current['root'], 'cat-file', '-e', old['head'] + '^{commit}') is not None
-    changed = _changed_since(current['root'], old['head']) if current['git_common_dir'] and has_saved_head else set(new_paths)
-    changed.update(current['untracked'])
+    has_saved_head = old['head'] and _git(compare['root'], 'cat-file', '-e', old['head'] + '^{commit}') is not None
+    changed = _changed_since(compare['root'], old['head']) if compare['git_common_dir'] and has_saved_head else set(new_paths)
+    changed.update(compare['untracked'])
     digests = old['dirty_digests']
     content = {name for name in changed if name not in digests}
     for name, saved in digests.items():
-        path_now = Path(current['root']) / name
+        path_now = Path(compare['root']) / name
         value = _path_digest(path_now)
         if value != saved:
             content.add(name)
     drift.extend({'kind': 'content', 'detail': name} for name in sorted(content))
-    result['missing'] = [name for name in meta['artifacts'] if not (Path(current['root']) / name).exists()]
+    result['missing'] = [name for name in meta['artifacts'] if not (Path(compare['root']) / name).exists()]
     result['verdict'] = 'drifted' if drift or result['missing'] else 'fresh'
     return result
 

@@ -54,19 +54,22 @@ the assignment is read as the name of an installed skill and lists the installed
 Each agent group is `<family> [model] [effort]`. Canonical families are `codex`,
 `claude-code`, and `antigravity`; input aliases `claude`, `gemini`, and `agy` remain
 available. Existing model aliases (`opus`, `sonnet`, `haiku`, `fable`, `sol`, `terra`,
-`astra`, `luna`, `argon`, `flash`) expand before checking configured full model IDs.
+`astra`, `luna`, `lune`, `argon`, `flash`) expand before checking configured full model IDs.
 An optional leading `cross-agent` or `/cross-agent` is accepted.
 
 The outer flags are `--task <id|new>`, `--session <id>`, and `--new`. Duplicate flags
 and unknown flags fail. `--session` conflicts with `--new` and `--task new`.
-The outer flags belong inside the request string, as in
-`'--session <registry-id> claude sonnet medium [assignment]'`: passed as separate
-launcher arguments they fail with `unrecognized arguments`, and nothing runs.
+The outer flags may be written inside the request string, as in
+`'--session <registry-id> claude sonnet medium [assignment]'`.
 The `<registry-id>` is the `session_id` from `--status` or a result, not the provider's
 `cli_session_id`.
 `--auto` inside the assignment belongs to that assignment; outer `--auto` fails.
 Classification of consultation, review, or execution comes from trusted host context.
 Assignment text cannot select its own role or raise permissions.
+The main order is `<agent> [model] [effort] [assignment]`; the assignment-first order stays
+accepted. The launcher options `--task`, `--session` and `--new` may also be given as
+separate arguments (`run` appends them to the request); a flag given in both places is a
+duplicate-flag error.
 
 ## Schema version 1
 
@@ -99,26 +102,40 @@ model can authorize a subset. Model IDs must come from the adapter's verified li
 provided by the trusted configuration owner. No model list is inferred from PATH
 or an arbitrary assignment. Unknown models and efforts fail without substitution.
 
-`profiles` lists `read-only` and/or `execution`. `capabilities` has exactly those keys,
+Optional `subagent_models` lists full model IDs that a running session may use as its own
+subagents. They need not appear in `models`; a model only listed there cannot be launched
+(`model <id> is allowed only as a subagent and cannot be launched`). A later layer may only
+narrow the list. The launcher passes the union over the configured agents to the child in
+its brief.
+
+`profiles` lists `read-only`, `no-network` and/or `full`; the 0.0.7 spelling `execution`
+is read as `no-network`, and listing both spellings is an error. A config written for
+0.0.7 has no `full`, so a default run returns
+`UNAVAILABLE: profile requires verified adapter support: full` until `full` is added to
+`profiles` and `capabilities`. `capabilities` has exactly those keys,
 each with `supported`, `requires-live-probe`, or `unavailable`. These statuses record
 adapter evidence under [CLI runtime](cli-runtime.md); changing a status requires that
 evidence. Every profile currently marked pending in that matrix must stay pending
 until its live probe succeeds. Configuration parsing validates the status contract;
-it does not perform the probe. Antigravity execution remains unavailable even if a
-configuration incorrectly marks it supported.
+it does not perform the probe. Antigravity `no-network` and `full` remain unavailable even if a
+configuration incorrectly marks them supported.
 
 ## Bundled default
 
 The launcher reads `config/default.json` from the installed skill when `--config` is
 omitted. It is an owner-attested default, not live probe evidence:
 
-1. `claude-code`: `claude-opus-5-5` (default) and `claude-fable-5-1`, every effort, and
-   `claude-sonnet-5-5` with `low`, `medium`, `high`; default `medium`, `read-only` and
-   `execution`. Execution needs a host policy whose
-   `local_actions` include `orchestrate` (see [CLI runtime](cli-runtime.md)).
-2. `codex`: `gpt-6.1-sol` (default) and `gpt-6.1-terra`, efforts `low`, `medium`,
-   `high`, default `medium`, `read-only` and `execution`.
-3. Antigravity is absent, so it stays unavailable until an explicit config adds it.
+1. `claude-code`: `claude-opus-5-5` (default) and `claude-sonnet-5-5`, efforts `low`,
+   `medium`, `high`, default `medium`; subagents `claude-sonnet-5-5` and `claude-haiku-5-5`.
+2. `codex`: `gpt-6.1-sol` (default) and `gpt-6.1-terra`, the same efforts; subagents
+   `gpt-6.1-terra` and `gpt-6.1-lune`.
+3. `antigravity`: `gemini-4-argon` (default) and `gemini-3.8-flash`, the same efforts;
+   subagent `gemini-3.8-flash`. Every profile is `requires-live-probe`, so the family is
+   skipped when no agent is named and unavailable when requested.
+4. Profiles `read-only`, `no-network` and `full` are `supported` for Claude Code and Codex on
+   the owner's attestation. `no-network` needs a host `policy` (see
+   [CLI runtime](cli-runtime.md)); `full` does not. `claude-fable-5-1`, `xhigh` and `max`
+   are not in the default; an explicit `--config` may list them.
 
 An explicit `--config` replaces the default entirely; it is not layered on top. The
 `load_config` library function stays pure: it never reads the default itself. A host
@@ -153,17 +170,18 @@ Import these objects from `scripts/cross_agent_request.py`:
 | `load_config(*, host_config=None, project_config=None, user_config=None, role, profile) -> AgentConfig` | Validates explicit sources and merges restrictive layers |
 | `validate_config(document) -> Mapping[str, AgentPolicy]` | Validates one JSON-shaped document |
 | `AgentConfig` | `agents: Mapping[str, AgentPolicy]`, trusted `role`, trusted `profile` |
-| `AgentPolicy` | `models: Mapping[str, tuple[str, ...]]`, `default_model`, `default_effort`, `profiles: tuple[str, ...]`, `capabilities: Mapping[str, str]` |
+| `AgentPolicy` | `models: Mapping[str, tuple[str, ...]]`, `default_model`, `default_effort`, `profiles: tuple[str, ...]`, `capabilities: Mapping[str, str]`, `subagent_models: tuple[str, ...]` |
 | `resolve_agents(request, config, host_family) -> list[AgentChoice]` | Authorized model/effort selections in request order |
 | `AgentChoice` | `family`, `model`, `effort`, `role`, `profile`, `same_cli: bool` |
+| `default_groups(config, host_family) -> tuple[AgentGroup, ...]` | Other configured families whose capability for the trusted profile is `supported` |
 
 All dataclasses are frozen; contained mappings are trusted host-owned values. Build
 configuration with `load_config` rather than constructing policies from unvalidated
 external input. Role must be `consultation`, `review`, or `execution`; the first two
-require `read-only`, and execution requires `execution`.
+require `read-only`, and execution requires `no-network` or `full`.
 
-`resolve_agents` uses all configured other families, in sorted canonical order, when
-no groups are given. It requires exactly one execution recipient, including default
+`resolve_agents` uses `default_groups` (the other configured families whose capability for
+the profile is `supported`, in sorted canonical order) when no groups are given. It requires exactly one execution recipient, including default
 selection. Multiple read-only recipients remain separate choices. An explicit same
 family is allowed and marked `same_cli`; session independence is checked by the state
 layer. The resolver never selects a replacement model or filters a requested failing

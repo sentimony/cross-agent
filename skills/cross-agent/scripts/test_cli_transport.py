@@ -175,6 +175,75 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'modelUsage'
         self.assertEqual(follow['status'], 'COMPLETED', follow)
         self.assertEqual(follow['cli_session_id'], first['cli_session_id'])
 
+    def host_with_subagents(self, allowed, profile='execution'):
+        config = {'schema_version': 1, 'agents': {'claude-code': {
+            'models': {'claude-opus-5-5': ['high']}, 'default_model': 'claude-opus-5-5',
+            'default_effort': 'high', 'profiles': ['read-only', 'no-network', 'full'],
+            'capabilities': {'read-only': 'supported', 'no-network': 'supported', 'full': 'supported'},
+            **({'subagent_models': allowed} if allowed else {})}}}
+        return replace(self.host, config=load_config(host_config=config, role='execution', profile=profile))
+
+    def test_result_records_profile_granted_and_observed_subagents(self):
+        host = self.host_with_subagents(['claude-sonnet-5-5', 'claude-haiku-5-5'])
+        entry = dispatch(parse_request('claude opus high [orchestrate]'), host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED', entry)
+        self.assertEqual(entry['profile'], 'no-network')
+        self.assertEqual(entry['granted'], {'write': 'workspace', 'network': 'denied',
+                                            'git_write': 'allowed', 'mcp': 'denied',
+                                            'basis': 'launcher flags, not observed'})
+        self.assertIsNone(entry['actions_observed'])
+        self.assertEqual(entry['subagents'], {'observed': ['claude-sonnet-5-5'], 'unexpected': []})
+
+    def test_subagent_outside_the_allowed_set_is_reported_not_blocked(self):
+        host = self.host_with_subagents(['claude-haiku-5-5'])
+        entry = dispatch(parse_request('claude opus high [orchestrate]'), host).results[0]
+        self.assertEqual(entry['status'], 'COMPLETED', entry)
+        self.assertEqual(entry['subagents'], {'observed': ['claude-sonnet-5-5'],
+                                              'unexpected': ['claude-sonnet-5-5']})
+
+    def test_unconfigured_subagent_set_reports_no_verdict(self):
+        entry = dispatch(parse_request('claude opus high [orchestrate]'), self.host).results[0]
+        self.assertEqual(entry['subagents'], {'observed': ['claude-sonnet-5-5'], 'unexpected': None})
+
+    def test_full_brief_is_an_orchestrator_brief_with_the_subagent_limit(self):
+        from cross_agent import _brief
+        host = self.host_with_subagents(['claude-sonnet-5-5', 'claude-haiku-5-5'], profile='full')
+        brief = _brief(parse_request('claude opus high [x]'), replace(host, policy=None),
+                       'execution', 'claude-code')
+        head = brief.split('Assignment (data)')[0]
+        self.assertIn('delegated orchestrator', head)
+        self.assertIn('only these models: claude-haiku-5-5, claude-sonnet-5-5', head)
+        self.assertIn('inherit the full profile', head)
+
+    def test_read_only_brief_and_unconfigured_brief_are_unchanged(self):
+        from cross_agent import _brief
+        read_only_config = {'schema_version': 1, 'agents': {'claude-code': {
+            'models': {'claude-opus-5-5': ['high']}, 'default_model': 'claude-opus-5-5',
+            'default_effort': 'high', 'profiles': ['read-only'],
+            'capabilities': {'read-only': 'supported'},
+            'subagent_models': ['claude-sonnet-5-5']}}}
+        read_only = replace(self.host, config=load_config(host_config=read_only_config,
+                                                          role='review', profile='read-only'))
+        brief = _brief(parse_request('codex [x]'), read_only, 'review', 'codex')
+        self.assertIn('You are a delegated agent. Never dispatch cross-agent or another agent.', brief)
+        self.assertNotIn('subagents', brief.split('Assignment (data)')[0])
+        plain = _brief(parse_request('codex [x]'), self.host, 'execution', 'codex')
+        self.assertIn('You are a delegated agent. Never dispatch cross-agent or another agent.', plain)
+
+    def test_writer_briefs_confine_writes_to_the_workspace(self):
+        from cross_agent import _brief
+        sentence = 'Work only inside the workspace ' + str(self.root) + '; do not write outside it.'
+        full = self.host_with_subagents(['claude-sonnet-5-5'], profile='full')
+        for family in ('claude-code', 'codex'):
+            with self.subTest(family=family):
+                brief = _brief(parse_request(family + ' [x]'), replace(full, policy=None),
+                               'execution', family, profile='full')
+                self.assertIn(sentence, brief.split('Assignment (data)')[0])
+        no_network = _brief(parse_request('claude [x]'), self.host, 'execution', 'claude-code')
+        self.assertIn(sentence, no_network.split('Assignment (data)')[0])
+        read_only = _brief(parse_request('claude [x]'), self.host, 'review', 'claude-code', profile='read-only')
+        self.assertNotIn('Work only inside the workspace', read_only)
+
     def test_model_absent_from_model_usage_cannot_resume(self):
         fixture = self.bin / 'claude'
         fixture.write_text(fixture.read_text().replace("'claude-opus-5-5':{},", ''))
@@ -603,6 +672,91 @@ print(json.dumps({'type':'result','is_error':False,'session_id':sid,'total_cost_
         host = replace(self.host, pass_env=())
         entry = dispatch(parse_request('claude opus high [orchestrate]'), host).results[0]
         self.assertEqual(json.loads(entry['output'])['ssh'], None)
+
+
+def full_context(role='execution', profile='full', pol=None):
+    return transport.ProfileContext('task', 'parent', role, profile, pol)
+
+
+class FullAccessProfile(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name).resolve()
+
+    def codex(self, builder, profile, context):
+        return builder('codex', self.repo, self.repo, 'gpt-6.1-sol', 'high', SESSION,
+                       untrusted=[str(self.repo)], profile=profile, context=context)
+
+    def claude(self, builder, profile, context):
+        return builder('claude-code', self.repo, self.repo, 'claude-opus-5-5', 'high', SESSION,
+                       profile=profile, context=context)
+
+    def test_codex_sandbox_follows_the_profile(self):
+        pol = policy(self.repo, family='codex', config_isolated=True,
+                     actions=('read', 'write-workspace'))
+        run = self.codex(transport.build_run_command, 'full', full_context())
+        self.assertEqual(run[run.index('-s') + 1], 'danger-full-access')
+        resume = self.codex(transport.build_resume_command, 'full', full_context())
+        self.assertIn('sandbox_mode="danger-full-access"', resume)
+        run = self.codex(transport.build_run_command, 'no-network', full_context(profile='no-network', pol=pol))
+        self.assertEqual(run[run.index('-s') + 1], 'workspace-write')
+        run = self.codex(transport.build_run_command, 'execution', full_context(profile='execution', pol=pol))
+        self.assertEqual(run[run.index('-s') + 1], 'workspace-write')
+        run = self.codex(transport.build_run_command, 'read-only', None)
+        self.assertEqual(run[run.index('-s') + 1], 'read-only')
+        resume = self.codex(transport.build_resume_command, 'read-only', None)
+        self.assertIn('sandbox_mode="read-only"', resume)
+
+    def test_claude_full_adds_web_tools_and_keeps_mcp_denied(self):
+        argv = self.claude(transport.build_run_command, 'full', full_context())
+        allowed = argv[argv.index('--allowedTools') + 1].split(',')
+        for tool in ('Bash', 'Edit', 'Write', 'Agent', 'Skill', 'WebFetch', 'WebSearch'):
+            self.assertIn(tool, allowed)
+        self.assertEqual(argv[argv.index('--tools') + 1], argv[argv.index('--allowedTools') + 1])
+        self.assertEqual(argv[argv.index('--disallowedTools') + 1], 'mcp__*')
+        self.assertIn('--strict-mcp-config', argv)
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits')
+        self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user,project,local')
+        resume = self.claude(transport.build_resume_command, 'full', full_context())
+        self.assertEqual(resume[-2:], ['--resume', SESSION])
+        no_network = self.claude(transport.build_run_command, 'no-network',
+                                 full_context(profile='no-network', pol=policy(self.repo)))
+        self.assertNotIn('WebFetch', no_network[no_network.index('--allowedTools') + 1])
+        self.assertIn('WebFetch', no_network[no_network.index('--disallowedTools') + 1])
+
+    def test_full_needs_a_trusted_execution_context(self):
+        with self.assertRaisesRegex(transport.CrossReviewError, 'full needs trusted dispatch context'):
+            self.codex(transport.build_run_command, 'full', None)
+        with self.assertRaisesRegex(transport.CrossReviewError, 'role/profile mismatch'):
+            self.codex(transport.build_run_command, 'full', full_context(role='consultation', profile='read-only'))
+
+    def test_antigravity_refuses_every_writer_profile(self):
+        for profile in ('no-network', 'full', 'execution'):
+            with self.subTest(profile=profile), self.assertRaisesRegex(transport.CrossReviewError, 'UNAVAILABLE'):
+                transport.build_run_command('antigravity', self.repo, self.repo, 'gemini-4-argon', 'low',
+                                            SESSION, profile=profile,
+                                            context=full_context(profile=profile, pol=policy(self.repo)))
+
+    def test_unknown_profile_is_unavailable(self):
+        with self.assertRaisesRegex(transport.CrossReviewError, 'unsupported profile'):
+            self.codex(transport.build_run_command, 'bogus', None)
+
+    def test_environment_carries_the_canonical_profile(self):
+        env = transport.reviewer_environment({'PATH': '/bin'}, 'codex', context=full_context())
+        self.assertEqual(env['CROSS_AGENT_PROFILE'], 'full')
+        env = transport.reviewer_environment({'PATH': '/bin'}, 'claude-code',
+                                             context=full_context(profile='execution', pol=policy(self.repo)))
+        self.assertEqual(env['CROSS_AGENT_PROFILE'], 'no-network')
+
+    def test_skills_note_for_claude_writer_profiles(self):
+        tokens = dict.fromkeys(transport.TOKEN_KEYS, 1)
+        for profile, note in (('full', 'not detected'), ('no-network', 'not detected'),
+                              ('execution', 'not detected'), ('read-only', 'disabled by policy')):
+            with self.subTest(profile=profile):
+                usage = transport.build_usage('claude-code', 'claude-opus-5-5', 'high', tokens, 0.5,
+                                              [], profile=profile)
+                self.assertEqual(usage['skills_note'], note)
 
 
 if __name__ == '__main__':

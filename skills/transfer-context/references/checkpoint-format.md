@@ -21,7 +21,11 @@ default-branch and origin ref values. The default branch comes only from local
 `refs/remotes/origin/HEAD`; unavailable values are null. A bare repository entry in the
 worktree list has null `head` and `branch`. These refs reflect the last local
 update and do not establish current server state. Old checkpoints remain valid; resume
-reports missing or unavailable facts in `unverified`. Delegated sessions contain
+reports missing or unavailable facts in `unverified`. When `resume-check` runs from
+another worktree of the same repository, its result has `resumed_from_other_worktree` (the
+checkpoint's worktree path, else null) and compares the checkpoint with that worktree;
+when that worktree is gone or no longer belongs to the repository, `drift` has a single
+`worktree-removed` entry and `unverified` lists `artifacts`. Delegated sessions contain
 session identity, task, family, model, effort, CLI session, state and liveness, or a
 `not_captured` reason. Source context records occupancy, window, percent, basis and
 threshold mode. Unknown values are null.

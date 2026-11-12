@@ -1,5 +1,5 @@
 """Trusted-host cross-agent dispatch. Child text is data, never authorization."""
-import argparse
+import contextlib
 from dataclasses import asdict, dataclass, field, replace
 import json
 import math
@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -18,7 +19,9 @@ import uuid
 import cross_agent_state as state_store
 import cli_transport as transport
 from cross_agent_protocol import (ProtocolError, validate_binding, load_skill_context, adapter_call, prepare_stop)
-from cross_agent_request import AgentGroup, FAMILIES, FORM_HINT, load_config, parse_request, resolve_agents, UnavailableError
+from cross_agent_profiles import WRITER_PROFILES, profile_grants
+from cross_agent_request import (AgentGroup, FAMILIES, FORM_HINT, default_groups, load_config, parse_request,
+                                 resolve_agents, UnavailableError)
 from cross_agent_state import TaskContext, select_session, reserve_session, update_session, finish_session, StateError
 
 STATUSES = frozenset(('COMPLETED', 'CONSULTATION_REQUIRED', 'USER_INPUT_REQUIRED',
@@ -99,6 +102,20 @@ def _text_file(path, text):
         stream.write(text)
 
 
+def _publish(path, value):
+    """Write JSON next to path and rename it into place, so a reader that sees the file
+    (for example wait) never sees a partial document."""
+    fd, staging = tempfile.mkstemp(prefix='.' + Path(path).name + '.', dir=str(Path(path).parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(value, indent=2) + '\n')
+        os.replace(staging, str(path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(staging)
+        raise
+
+
 def _binary_file(path):
     return os.fdopen(os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'wb')
 
@@ -121,6 +138,20 @@ def _terminate(proc, grace):
         return True
     except subprocess.TimeoutExpired:
         return False
+
+
+@contextlib.contextmanager
+def _defer_sigterm():
+    """Hold SIGTERM while the registry publishes a reservation, so a cancel that lands in
+    that window is delivered after run_id is bound and the run is still released."""
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, 'pthread_sigmask'):
+        yield
+        return
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
 
 
 def _process(argv, brief, run, host, env):
@@ -261,6 +292,8 @@ def _provider(family, run, requested_model=None, env=None):
                 and isinstance(model_usage, dict) and requested_model in model_usage):
             observed['actual_model'] = requested_model
             observed['model_basis'] = 'launch-flag+modelUsage'
+        if family == 'claude-code' and isinstance(model_usage, dict):
+            observed['models_used'] = sorted(model_usage)
         if family == 'claude-code':
             answer, parsed = transport.parse_claude_output(raw)
             if payload.get('is_error'):
@@ -391,14 +424,48 @@ def _owner_host(host, request):
                                'new_session': request.new_session}}
 
 
-def _brief(request, host, role, family):
-    orchestrator = (family == 'claude-code' and host.policy is not None
-                    and 'orchestrate' in getattr(host.policy, 'local_actions', ()))
-    delegation = ('You are a delegated orchestrator. Never dispatch cross-agent; your own '
-                  'subagents and the review commands the assignment names are allowed.'
-                  if orchestrator else
-                  'You are a delegated agent. Never dispatch cross-agent or another agent.')
+CODEX_NO_NETWORK_WARNING = 'codex no-network: sandbox workspace-write, no network, no write access to .git'
+
+
+def _subagent_allowed(config):
+    return sorted({m for policy in config.agents.values() for m in policy.subagent_models})
+
+
+def _subagent_line(config, profile):
+    allowed = _subagent_allowed(config)
+    if profile == 'read-only' or not allowed:
+        return None
+    return ('Your own subagents (Agent tool, spawn_agent) may use only these models: '
+            + ', '.join(allowed) + '; effort not above high; they inherit the ' + profile
+            + ' profile and must not exceed it. Never dispatch cross-agent.')
+
+
+def _subagent_report(agent, observed, config):
+    used = observed.get('models_used')
+    if agent.family != 'claude-code' or used is None:
+        return {'observed': None, 'unexpected': None}
+    seen = sorted(m for m in used if m != agent.model)
+    allowed = _subagent_allowed(config)
+    return {'observed': seen, 'unexpected': [m for m in seen if m not in allowed] if allowed else None}
+
+
+def _brief(request, host, role, family, profile=None):
+    profile = profile or host.config.profile
+    orchestrator = (family == 'claude-code' and (profile == 'full' or (
+        host.policy is not None and 'orchestrate' in getattr(host.policy, 'local_actions', ()))))
+    sub = _subagent_line(host.config, profile)
+    if orchestrator:
+        delegation = ('You are a delegated orchestrator. Never dispatch cross-agent; your own '
+                      'subagents and the review commands the assignment names are allowed.')
+    elif sub:
+        delegation = 'You are a delegated agent. Never dispatch cross-agent (your own subagents are allowed below).'
+    else:
+        delegation = 'You are a delegated agent. Never dispatch cross-agent or another agent.'
     lines = [delegation]
+    if sub:
+        lines.append(sub)
+    if profile in WRITER_PROFILES:
+        lines.append('Work only inside the workspace ' + host.workspace + '; do not write outside it.')
     if orchestrator:
         lines.append('No user is attached. A decision for the owner is status USER_INPUT_REQUIRED '
                      'with handoff question, options, evidence and consultants (lists, may be '
@@ -441,11 +508,10 @@ def dispatch(request, host_context):
                       'artifacts': {}}])
     if host.assignment_kind not in ('consultation', 'skill'):
         raise ValueError('unknown trusted assignment kind')
-    groups = request.agent_groups or tuple(AgentGroup(f) for f in sorted(host.config.agents)
-                                           if f != FAMILIES[host.host_family])
+    groups = request.agent_groups or default_groups(host.config, host.host_family)
     if request.session_selector is not None and len(groups) != 1:
         raise ValueError('Explicit session requires exactly one recipient')
-    if host.config.profile == 'execution' and len(groups) != 1:
+    if host.config.profile in WRITER_PROFILES and len(groups) != 1:
         raise ValueError('execution requires one writer')
     # Validate every deterministic group error before task/session mutation or
     # inference. Genuine unavailability stays a separate per-recipient result.
@@ -486,13 +552,20 @@ def dispatch(request, host_context):
                    task_context=replace(host.task_context, canonical_issue=None)
                    if request.task_selector == 'new' else host.task_context)
     result = DispatchResult(target_identity=fresh)
+    if any(not isinstance(a, UnavailableError) and a.family == 'codex' and a.profile == 'no-network'
+           for a in preflight):
+        result.warnings.append(CODEX_NO_NETWORK_WARNING)
     if not groups:
         result.results.append({'status': 'UNAVAILABLE', 'reason': 'no configured other agents'})
     for group, agent in zip(groups, preflight):
         entry = {'family': group.family, 'status': 'FAILED', 'operation': host.config.role, 'actual_model': 'unknown',
                  'actual_effort': 'unknown', 'cli_session_id': 'unknown',
                  'target_identity': result.target_identity, 'artifacts': {},
-                 'usage': {'tokens': None, 'cost_usd': None}}
+                 'usage': {'tokens': None, 'cost_usd': None},
+                 'profile': host.config.profile if isinstance(agent, UnavailableError) else agent.profile,
+                 'granted': None if isinstance(agent, UnavailableError)
+                 else profile_grants(agent.family, agent.profile),
+                 'actions_observed': None, 'subagents': {'observed': None, 'unexpected': None}}
         result.results.append(entry)
         run = run_id = decision = previous_run = None
         cancelled = adopted = False
@@ -518,7 +591,7 @@ def dispatch(request, host_context):
             result.task_id = decision.task_id
             if decision.resume and not decision.cli_session_id:
                 raise UnavailableError('resume identity unavailable; use --new for a fresh session')
-            brief = _brief(request, host, host.config.role, agent.family)
+            brief = _brief(request, host, host.config.role, agent.family, profile=agent.profile)
             if decision.resume:
                 with state_store._registry(host.task_context) as registry:
                     runs = list(registry['sessions'][decision.session_id]['runs'])
@@ -554,7 +627,8 @@ def dispatch(request, host_context):
             # Only Claude Code takes the launcher's ID; recording it lets --status
             # read the transcript of a fresh run before the provider confirms it.
             launch_id = cli_id if not resume and agent.family == 'claude-code' else None
-            run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label)
+            with _defer_sigterm():
+                run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
@@ -581,6 +655,7 @@ def dispatch(request, host_context):
             try:
                 text, observed, reported = _provider(agent.family, run, agent.model, child_env)
                 entry['observed_identity'] = observed
+                entry['subagents'] = _subagent_report(agent, observed, host.config)
                 limits = (_codex_rate_limits(observed.get('cli_session_id'), child_env)
                           if agent.family == 'codex' else None)
                 entry['usage'] = _usage(agent, reported, observed, decision, previous_run, run,
@@ -631,6 +706,10 @@ def dispatch(request, host_context):
                         ('owner_id', 'adapter_id', 'contract_version', 'protocol_version')}
                     entry['domain_result'] = validated
                     entry['domain_intake'] = intake
+        except KeyboardInterrupt:
+            # SIGTERM or Ctrl-C before the child exists (after the run was reserved).
+            entry.update(status='CANCELLED', reason='SIGNAL')
+            cancelled = True
         except UnavailableError as exc:
             entry.update(status='UNAVAILABLE', reason=str(exc))
         except StateError as exc:
@@ -654,7 +733,7 @@ def dispatch(request, host_context):
                     for path in run.iterdir():
                         if path.is_file():
                             path.chmod(0o600)
-                    _write(run / 'result.json', entry)
+                    _publish(run / 'result.json', entry)
                 except OSError as exc:
                     entry.setdefault('cleanup_errors', []).append('artifact persistence failed: ' + str(exc))
                     if entry['status'] not in ('FAILED', 'UNAVAILABLE', 'CANCELLED', 'BLOCKED'):
@@ -862,6 +941,7 @@ def status(host, config_dir=None):
                'launch_cli_session_id': launch, 'state': session['status'],
                'label': run.get('label'), 'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
+               'result_path': run.get('result_path'),
                'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}
         if session['family'] == 'claude-code' and (cli or launch):
             transcript = claude_transcript(host.workspace, cli or launch, config_dir, child_env)
@@ -878,11 +958,14 @@ MAX_ASSIGNMENT_BYTES = 1024 * 1024
 
 def read_assignment_file(path):
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        with os.fdopen(fd, 'rb') as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                raise ValueError('assignment file must be a regular file')
-            data = source.read(MAX_ASSIGNMENT_BYTES + 1)
+        if path == '-':
+            data = sys.stdin.buffer.read(MAX_ASSIGNMENT_BYTES + 1)
+        else:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ValueError('assignment file must be a regular file')
+                data = source.read(MAX_ASSIGNMENT_BYTES + 1)
         if len(data) > MAX_ASSIGNMENT_BYTES:
             raise ValueError('assignment file exceeds 1 MiB limit')
         return data.decode('utf-8')
@@ -891,79 +974,8 @@ def read_assignment_file(path):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--host-context', required=True, help='Explicit trusted host JSON, never child-provided')
-    parser.add_argument('--config', default=str(DEFAULT_CONFIG),
-                        help='Trusted agent configuration JSON; defaults to the bundled config/default.json')
-    parser.add_argument('--adopt-cli-session', metavar='UUID',
-                        help='Bind this existing provider session to a registry session, print its ID and exit')
-    parser.add_argument('--assignment-file', metavar='PATH', help='Read assignment as strict UTF-8')
-    parser.add_argument('--label', metavar='TEXT',
-                        help='Short label (at most 40 characters) stored on the run and shown by --status')
-    parser.add_argument('--status', action='store_true',
-                        help='Print the sessions of this repository with their last activity and exit')
-    parser.add_argument('request', nargs='?', help='One literal bracket request argument; no shell evaluation')
-    args = parser.parse_args(argv)
-    raw = json.loads(Path(args.host_context).read_text('utf-8'))
-    task = TaskContext(**raw.pop('task_context'))
-    role = raw.pop('role')
-    profile = raw.pop('profile')
-    if 'policy' in raw:
-        policy = raw['policy']
-        policy['local_actions'] = tuple(policy['local_actions'])
-        raw['policy'] = transport.VerifiedProfilePolicy(**policy)
-    if 'pass_env' in raw:
-        raw['pass_env'] = tuple(transport.validate_pass_env(raw['pass_env']))
-    roots = raw.get('required_roots', [])
-    if (not isinstance(roots, list)
-            or any(not isinstance(p, str) or not os.path.isabs(p) for p in roots)):
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
-                          'reason': 'required_roots must be a list of absolute path strings'}))
-        return 2
-    raw['required_roots'] = tuple(roots)
-    host = HostContext(config=load_config(host_config=args.config, role=role, profile=profile),
-                       task_context=task, **raw)
-    if args.label is not None:
-        try:
-            state_store.check_label(args.label)
-        except StateError as exc:
-            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
-            return 2
-        host = replace(host, label=args.label)
-    if args.status:
-        print(json.dumps(status(host), ensure_ascii=False, indent=1))
-        return 0
-    if args.request is None:
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED',
-                          'reason': 'request is required: ' + FORM_HINT}))
-        return 2
-    try:
-        assignment = None
-        if args.assignment_file is not None:
-            assignment = read_assignment_file(args.assignment_file)
-        request = parse_request(args.request, assignment)
-    except ValueError as exc:
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
-        return 2
-    if args.adopt_cli_session:
-        try:
-            session_id = adopt(host, request, args.adopt_cli_session)
-        except ValueError as exc:
-            print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc)}))
-            return 2
-        print(json.dumps({'schema_version': 1, 'status': 'COMPLETED', 'session_id': session_id}))
-        return 0
-    warnings = _temp_warnings({'artifact_root': host.artifact_root,
-                               'registry_path': task.registry_path}, _temp_roots())
-    try:
-        result = dispatch(request, host)
-    except (ValueError, transport.CrossReviewError) as exc:
-        print(json.dumps({'schema_version': 1, 'status': 'BLOCKED', 'reason': str(exc),
-                          'warnings': warnings}))
-        return 2
-    result.warnings = warnings
-    print(json.dumps(result.to_dict()))
-    return 0 if all(r['status'] == 'COMPLETED' for r in result.results) else 1
+    import cross_agent_cli
+    return cross_agent_cli.main(argv)
 
 
 if __name__ == '__main__':

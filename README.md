@@ -3,20 +3,20 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.7`
+Version: `v0.0.8`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.7 | cross-agent, transfer-context |
+| [cross-agent](.) | 0.0.8 | cross-agent, transfer-context |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.7 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.7 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.8 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.8 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
 
 ## Overview
 
@@ -38,6 +38,10 @@ Version: `v0.0.7`
    2026-11-10 the three-manifest layout installed from the branch with Claude Code
    2.1.322 and Codex 0.167.0 (both skills at 0.0.7); invocation and Antigravity are not
    checked.
+6. Since `v0.0.8` an execution run defaults to the `full` profile; `--mode no-network` or
+   `--mode read-only` narrows it. `run`, `status`, `adopt`, `init-host`, `cancel` and `wait`
+   build the host JSON from the repository; Antigravity models stay unavailable until a
+   live probe.
 
 ## Install
 
