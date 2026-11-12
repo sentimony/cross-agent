@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.0.8 - 2026-11-12
+
+1. Add the profiles `full` (the default for an execution run), `no-network` (the former
+   `execution`, still read as that spelling) and `read-only`. `--mode` narrows the host
+   profile and never widens it; a consultation or review host stays `read-only`
+   (`20261106-2033`, `20261105-2203`).
+2. Codex `full` runs with `-s danger-full-access`; Claude Code `full` adds `WebFetch` and
+   `WebSearch` to the `no-network` tools and keeps MCP denied. Neither is verified against a
+   live CLI. `full` needs no host `policy`; `no-network` still does.
+3. Replace the bundled model set: `claude-opus-5-5`, `claude-sonnet-5-5`, `gpt-6.1-sol`,
+   `gpt-6.1-terra`, and `gemini-4-argon`, `gemini-3.8-flash` (pending live probe), each with
+   efforts `low`, `medium`, `high`. `claude-fable-5-1`, `xhigh` and `max` are gone from the
+   default. A config written for 0.0.7 has no `full` profile and returns `UNAVAILABLE` for a
+   default run until `full` is added.
+4. Add the optional `subagent_models` field, `claude-haiku-5-5` and `gpt-6.1-lune` as
+   subagent-only models, and the `lune` alias. The brief lists the allowed subagent models;
+   the result records `subagents`. Default recipients skip families whose profile is not
+   `supported`.
+5. Add the subcommands `run`, `status`, `adopt`, `init-host`, `cancel` and `wait`, a
+   host JSON built from the repository, separate `--task`/`--session`/`--new`,
+   `--assignment-file -`, `--dry-run`, `status --json --session --active` and `result_path`
+   in status rows. `--status` and `--adopt-cli-session` stay one more release
+   (`20261106-2033`, `20261004-0011`).
+6. Record `profile`, `granted` and `actions_observed` in every result and warn about the
+   Codex `no-network` sandbox (`20261104-1109`).
+7. Move the registry, adoption, status and cost-estimate text from `SKILL.md` to
+   `references/sessions.md`.
+8. Harden the new surface: the state directory must be a real directory with mode 700,
+   `init-host --force` stages through an exclusive temporary file, `wait` exits 1 with
+   `result_missing` when a run ended without a result path, and a `cancel` that lands
+   before the child starts is recorded as `CANCELLED`.
+
 ## 0.0.7 - 2026-11-10
 
 1. Name the bracketed assignment form in every request parse error, list the installed

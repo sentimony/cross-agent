@@ -726,6 +726,64 @@ print(json.dumps({'session_id':sid,'model':'claude-opus-5-5','effort':'low','res
                     _process(['sentinel'], '', self.root, self.host, {})
                 spawn.assert_not_called()
 
+    def writer_host(self, profile, policy=None):
+        import cli_transport as transport
+        config = {'schema_version': 1, 'agents': {'codex': {
+            'models': {'gpt-6.1-sol': ['low']}, 'default_model': 'gpt-6.1-sol',
+            'default_effort': 'low', 'profiles': ['read-only', 'no-network', 'full'],
+            'capabilities': {'read-only': 'supported', 'no-network': 'supported', 'full': 'supported'}}}}
+        pol = None
+        if policy:
+            pol = transport.VerifiedProfilePolicy('codex', str(self.root), 'owner attested', 'owner attested',
+                                                  ('read', 'write-workspace'), True, True)
+        return replace(self.host, config=load_config(host_config=config, role='execution', profile=profile),
+                       policy=pol)
+
+    def test_codex_no_network_run_warns_and_records_its_rights(self):
+        host = self.writer_host('no-network', policy=True)
+        result = dispatch(parse_request('codex sol low [work]'), host)
+        entry = result.results[0]
+        self.assertEqual(entry['status'], 'COMPLETED', entry)
+        self.assertEqual(entry['profile'], 'no-network')
+        self.assertEqual(entry['granted']['network'], 'denied')
+        self.assertIsNone(entry['actions_observed'])
+        self.assertIn('codex no-network: sandbox workspace-write, no network, no write access to .git',
+                      result.warnings)
+        self.assertEqual(entry['output'], 'done')
+
+    def test_codex_full_run_needs_no_policy_and_does_not_warn(self):
+        host = self.writer_host('full')
+        result = dispatch(parse_request('codex sol low [work]'), host)
+        entry = result.results[0]
+        self.assertEqual(entry['status'], 'COMPLETED', entry)
+        self.assertEqual((entry['profile'], entry['granted']['network'], entry['granted']['write']),
+                         ('full', 'allowed', 'unrestricted'))
+        self.assertEqual(result.warnings, [])
+
+    def test_no_network_without_host_policy_is_unavailable(self):
+        entry = dispatch(parse_request('codex sol low [work]'), self.writer_host('no-network')).results[0]
+        self.assertEqual(entry['status'], 'UNAVAILABLE')
+        self.assertIn('execution needs verified scoped host policy', entry['reason'])
+
+    def test_default_recipients_skip_unsupported_families(self):
+        config = {'schema_version': 1, 'agents': {
+            'codex': {'models': {'gpt-6.1-sol': ['low']}, 'default_model': 'gpt-6.1-sol',
+                      'default_effort': 'low', 'profiles': ['read-only'],
+                      'capabilities': {'read-only': 'supported'}},
+            'antigravity': {'models': {'gemini-4-argon': ['low']}, 'default_model': 'gemini-4-argon',
+                            'default_effort': 'low', 'profiles': ['read-only'],
+                            'capabilities': {'read-only': 'requires-live-probe'}}}}
+        host = replace(self.host, config=load_config(host_config=config, role='consultation',
+                                                     profile='read-only'))
+        result = dispatch(parse_request('[question]'), host)
+        self.assertEqual([r['family'] for r in result.results], ['codex'])
+        pending = dispatch(parse_request('[question] gemini'), host).results[0]
+        self.assertEqual(pending['status'], 'UNAVAILABLE')
+        self.assertEqual(pending['profile'], 'read-only')
+        self.assertIsNone(pending['granted'])
+        self.assertIsNone(pending['actions_observed'])
+        self.assertEqual(pending['subagents'], {'observed': None, 'unexpected': None})
+
 
 class TerminationContract(unittest.TestCase):
     def test_cleanup_wait_is_bounded(self):

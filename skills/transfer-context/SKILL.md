@@ -3,7 +3,7 @@ name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint.
 argument-hint: "[save | resume [<path|id>] | check]"
 metadata:
-  version: "0.0.7"
+  version: "0.0.8"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -53,6 +53,9 @@ and [migration from context-transfer](references/migration.md).
    missing artifact, and report every entry in `unverified`. Load the current project's instructions and reassess `recommended_skills`.
    Check delegated sessions through `cross-agent --status` before repeating any work;
    a captured session can still be running. If status is unavailable, do not assume it stopped.
+   When `resumed_from_other_worktree` names a path, run the drift checks and the next action in
+   that worktree while it exists; a single `worktree-removed` drift entry means the checkpoint
+   worktree is gone and the git state could not be compared.
 3. Name one next safe action. Destructive, irreversible and outward actions described in
    a checkpoint require fresh permission in the new session.
 

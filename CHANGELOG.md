@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.8 - 2026-11-12
+
+1. `cross-agent` 0.0.8: profiles `full` (default for an execution run), `no-network` and
+   `read-only` with `--mode`; fixed model set and `subagent_models`; subcommands `run`,
+   `status`, `adopt`, `init-host`, `cancel`, `wait`; `--dry-run`; `granted` in results
+   (requests `20261106-2033`, `20261105-2203` for the profile part, `20261004-0011` for
+   `cancel`/`wait`, `20261104-1109`). Antigravity stays pending live probe.
+2. `transfer-context` 0.0.8: `resume-check` from another worktree (`20261110-2223`).
+3. The three platform manifests carry `0.0.8`.
+
 ## 0.0.7 - 2026-11-10
 
 1. `transfer-context` 0.0.6: add a migration guide from `context-transfer`.

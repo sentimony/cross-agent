@@ -6,7 +6,9 @@
 2. Host JSON contains `task_context` (`registry_path`, `repo`, `conversation_id`,
    optional active task IDs/canonical issue), `host_family`, `workspace`,
    `artifact_root`, `target_identity`, trusted `assignment_kind`, `installed_skills`,
-   `role`, `profile`, optional timeout/policy/environment/`pass_env` (variable names kept
+   `role`, optional `profile` (the host's ceiling: `read-only`, `no-network`, `full` or the
+   legacy `execution`; default `full` for `role: execution`, `read-only` otherwise),
+   optional timeout/policy/environment/`pass_env` (variable names kept
    in the child), answer and opaque `owner_context` object. CLI configuration is a
    separate explicit schema1 file; child text cannot supply host fields. Hosts should put
    `registry_path` and `artifact_root` under
@@ -45,7 +47,7 @@
 
    Add `assignment_kind: "skill"` and
    `installed_skills: {"<name>": {"origin": "<origin>", "base": "<absolute skill dir>"}}`
-   to run an installed skill. Execution profiles also need `policy` (`family`, `repo`,
+   to run an installed skill. The `no-network` profile also needs `policy` (`family`, `repo`,
    `fresh_evidence`, `resume_evidence`, `local_actions`, `delegation_blocked`,
    `config_isolated`; see [CLI runtime](cli-runtime.md)). When evidence is empty, the
    launcher answers
@@ -60,6 +62,12 @@
    `token_count` event's snapshot taken after the run (`primary`, `secondary`,
    `plan_type`), or `null` when that event carries none, without data, and for other
    families. There is no snapshot before the run, so no delta or warning threshold.
+   Each recipient result has `profile` (canonical name), `granted` (`write`, `network`,
+   `git_write`, `mcp`, `basis`; null for a family without an adapter), `actions_observed`
+   (always null: actions are not detected) and `subagents` (`observed`, `unexpected`; null
+   when the adapter cannot see them). A Codex `no-network` recipient adds
+   `codex no-network: sandbox workspace-write, no network, no write access to .git` to the
+   dispatch `warnings`.
 4. `integration_required` or an installed skill's equivalent flag requires `integration`.
    This binding contains stable `owner_id`, `adapter_id`, integer `contract_version: 1`,
    `protocol_version: 1`, and `capabilities: ["prepare", "validate", "intake"]`.
@@ -93,6 +101,17 @@
 9. Adapter stderr/invalid response is a failure, not executable content. Native metadata,
    adapter authenticity and external service behavior require separate evidence.
 
+## Subcommands
+
+1. `run` prints the `DispatchResult`.
+2. `run --dry-run` prints `{"schema_version": 1, "dry_run": true, "recipients": [...], "warnings": [...]}`.
+3. `status` prints one line per session, or the rows below with `--json`.
+4. `init-host` prints `{"schema_version": 1, "status": "COMPLETED", "host_context", "state_dir"}`.
+5. `cancel` prints `{"schema_version": 1, "status": "COMPLETED", "action": "cancel", "session_id",
+   "pid", "signalled": true}`, or `BLOCKED` with `UNKNOWN_SESSION`, `NOT_RUNNING` or `PID_MISMATCH`.
+6. `wait` prints the status row with `waited_seconds` and `timed_out`; the exit code is 0
+   (finished), 3 (timeout) or 2 (`BLOCKED`).
+
 ## Status rows
 
 `--status` prints `{"schema_version": 1, "sessions": [...]}` without writing the registry:
@@ -112,3 +131,4 @@ field that does not apply is `null`.
 | `started_at`, `elapsed_seconds` | Start time and duration (until `finished_at` once finished). |
 | `last_text`, `last_tool`, `last_at` | Last main-thread message, tool call and time (Claude Code). |
 | `estimate` | Token and cost estimate from the transcripts (Claude Code), not billing data. |
+| `result_path` | `result.json` of the latest run, or null. |

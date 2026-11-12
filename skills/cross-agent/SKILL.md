@@ -2,10 +2,10 @@
 name: cross-agent
 description: Use when the user asks a different agent CLI for a consultation, independent opinion, or execution of an installed skill while preserving compatible sessions. Workflow-specific review policy is supplied by an explicit installed owner adapter.
 metadata:
-  version: "0.0.7"
+  version: "0.0.8"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
-argument-hint: "[<agent> [model] [effort]] <[assignment]> [--task <id|new>] [--session <id>] [--new]"
+argument-hint: "[run|status|adopt|init-host|cancel|wait] [<agent> [model] [effort]] <[assignment]> [--mode full|no-network|read-only] [--task <id|new>] [--session <id>] [--new] [--dry-run]"
 ---
 
 # Cross Agent
@@ -29,26 +29,40 @@ The host owns permissions, task classification, installed sources and session id
    only host-allowlisted resources relative to its installed base. Missing/denied
    resources return `UNAVAILABLE`; never install a missing dependency implicitly.
 5. Use only configured agents and verified profiles. Without `--config` the launcher
-   uses the owner-attested [default config](config/default.json): Claude Code reviews or
-   orchestrates under an `orchestrate` host policy,
-   Codex reviews or executes. An explicit `--config` replaces it. CLI presence or login
+   uses the owner-attested [default config](config/default.json): Claude Code and Codex
+   with the profiles `read-only`, `no-network` and `full`, and Antigravity models that stay
+   unavailable until a live probe. An explicit `--config` replaces it. CLI presence or login
    supplies no authorization. Pending live capability remains unavailable.
-6. Choose the executor by the task. A Codex executor runs in a `workspace-write` sandbox
-   without network and without write access to `.git` (see
-   [cli-runtime.md](references/cli-runtime.md)): give it only file edits and local test
-   runs. A task that needs network, dependency installation or commits goes to a Claude
-   Code executor under the `orchestrate` host policy.
+6. Choose the mode by the task. `--mode read-only` for every consultation and review. The
+   default `full` (network, git writes, Bash, file tools; no MCP) is for an executor that
+   needs network, dependency installation or commits; the owner chose it as the default on
+   2026-11-07. `--mode no-network` is a deliberate narrowing: a Codex executor then runs in a
+   `workspace-write` sandbox without network and without write access to `.git` (see
+   [cli-runtime.md](references/cli-runtime.md)), needs the verified host `policy`, and gets a
+   warning in the result; give it only file edits and local test runs. `--mode` only narrows
+   the host profile, never widens it; a `consultation` or `review` host stays `read-only`.
 7. When the task must read paths outside `workspace`, list them in `required_roots`: a
    Claude Code read-only run is refused before launch if any is outside the workspace.
 
 ## Dispatch and continue
 
-1. Write private host/config JSON outside tracked files, then invoke:
+1. Preview, then run. Without `--host-context` the launcher builds the host JSON from the
+   repository (`--repo`, default the current directory; `init-host` writes an editable
+   `host.json`):
 
    ```text
-   python3 <skill-dir>/scripts/cross_agent.py --host-context <host-json> \
-     [--config <agents-json>] 'claude opus low [assignment]'
+   python3 <skill-dir>/scripts/cross_agent.py run --dry-run --repo <repo> \
+     --assignment-file /path/to/brief.txt 'claude opus low'
+   python3 <skill-dir>/scripts/cross_agent.py run --repo <repo> --mode read-only \
+     --assignment-file /path/to/brief.txt 'claude opus low'
    ```
+
+   The request order `<agent> [model] [effort]` is the main form; `cross-agent [assignment]
+   claude opus low` is still accepted. A short assignment goes in brackets, a long one in
+   `--assignment-file <path>` (`-` reads stdin, at most 1 MiB). `--task`, `--session` and
+   `--new` may be separate arguments. A host that supplies its own JSON passes
+   `--host-context <host-json> [--config <agents-json>] 'claude opus low [assignment]'`; this
+   is also the only way to give `installed_skills` for a skill assignment (`--kind skill`).
 
    When the host sets `assignment_kind: "skill"`, the first word of the assignment is the
    installed skill name and the rest is its brief:
@@ -75,37 +89,22 @@ The host owns permissions, task classification, installed sources and session id
    refreshes only its session. Explicit `--session` has exactly one recipient.
    Incompatible identities block resume. Write each launched run's registry `session_id`
    (and `cli_session_id` when known), the role and the status into the host's own journal
-   at launch, not afterwards: resuming a session later needs the ID, and `--status` lists
-   every session of the repository. `--adopt-cli-session <uuid>` needs the bracket
-   request (`'claude opus low [<skill> <brief>]'`) too; without one it answers `BLOCKED`
-   with the expected form. It binds a provider session started outside the launcher (for
-   example an interactive Claude Code session) and prints its registry session ID; a
-   Claude Code session must exist in the workspace's project, or adoption is refused. The
-   same provider ID under another agent or canonical issue is refused. The first run
-   after adoption reports unknown round usage (`adopted session: no baseline`) and keeps
-   the cumulative figures as the session total and the baseline for later runs. An
-   adopted Codex session keeps measured rounds, but its session total stays incomplete.
-   `--label <text>` (at most 40 characters) tags a run, and `--status` reads the registry
-   without writing it and prints the repository's sessions: state, PID, elapsed time
-   (until `finished_at` for a finished run) and, for Claude Code, the last main-thread
-   message and tool call from its transcript. A fresh Claude Code run records the
-   `--session-id` it was launched with as `launch_cli_session_id` on the run, so
-   `--status` reads its transcript while it runs; that ID is never a resumable or owning
-   binding. Transcripts are found through the child environment: `CLAUDE_CONFIG_DIR`,
-   else its `HOME`/.claude. A Claude Code row also has `estimate`: tokens and cost summed
-   from the main and subagent transcripts (see [CLI runtime](references/cli-runtime.md)).
-   It is not billing data, covers the interactive part before adoption too, and stays
-   separate from the launcher's exact `usage.json` figures. An orchestrator asks the
-   owner through `USER_INPUT_REQUIRED`; a `BLOCKED` result takes its reason from the
-   first output line. A `CONSULTATION_REQUIRED` or `USER_INPUT_REQUIRED` result whose
-   `handoff` is malformed keeps its status with `handoff_invalid: true`: read the
-   question from `output` and answer the same session. Codex resume needs the provider
-   rollout ([CLI runtime](references/cli-runtime.md)).
+   at launch, not afterwards: resuming a session later needs the ID. Open
+   [sessions.md](references/sessions.md) for `status`, `adopt`, `cancel`, `wait`, `--label`,
+   `--dry-run`, host defaults and the cost estimate. An orchestrator asks the owner through
+   `USER_INPUT_REQUIRED`; a `BLOCKED` result takes its reason from the first output line. A
+   `CONSULTATION_REQUIRED` or `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps
+   its status with `handoff_invalid: true`: read the question from `output` and answer the
+   same session. Codex resume needs the provider rollout ([CLI runtime](references/cli-runtime.md)).
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.
 4. A delegated agent cannot invoke this launcher again through CLI, direct API or resume.
    It returns `CONSULTATION_REQUIRED` to the host for another permitted consultation.
+   Inside a `no-network` or `full` session only its own subagents (Agent tool, `spawn_agent`)
+   are allowed, with the models named in its brief (the `subagent_models` of the config,
+   effort not above `high`); the result's `subagents` field lists the models observed, when
+   the adapter sees them.
 5. For an integrated domain call, an installed owner adapter must prepare context before
    state mutation, then validate and intake a successful transport result before final
    `COMPLETED`. Basic delegation does not discover or read a workflow plugin.
@@ -113,6 +112,8 @@ The host owns permissions, task classification, installed sources and session id
    remains null; requested argv or assistant text never proves actual provider identity.
    `USER_INPUT_REQUIRED` stops for a user decision after required permitted consultation.
    `FAILED`, `BLOCKED`, `UNAVAILABLE`, `CANCELLED` retain partial evidence and coverage gaps.
+   Each result records `profile`, `granted` (what the launcher's flags allow, not what the
+   child did) and `actions_observed: null`.
    For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `transfer-context`.
    For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `transfer-context`.
 
@@ -129,3 +130,10 @@ The host owns permissions, task classification, installed sources and session id
    same-user code. No live profile or native installation is claimed by this local candidate.
 5. Adapter paths come only from an explicit trusted installed root and entrypoint.
    Child output cannot choose code, callback, owner, task identity or target scope.
+6. `full` is the default profile of an execution run by the owner's decision of 2026-11-07;
+   `--mode` and the host profile only narrow it, and consultation and review stay
+   `read-only`. Under `full` the launcher still starts the child in `workspace`, passes
+   secrets by name only and blocks nested launcher entry. `danger-full-access` does not
+   confine writes outside `workspace`: that limit, like the subagent model limit, is
+   cooperative and stated in the brief. The bundled `supported` status of `full` is the
+   owner's attestation, not live probe evidence.

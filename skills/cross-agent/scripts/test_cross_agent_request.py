@@ -3,6 +3,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+import cross_agent
 import cross_agent_request as r
 
 
@@ -166,15 +167,151 @@ class BundledDefaultTests(unittest.TestCase):
         choices = r.resolve_agents(r.parse_request('[a]'), review, 'codex')
         self.assertEqual([(c.family, c.model, c.effort) for c in choices],
                          [('claude-code', 'claude-opus-5-5', 'medium')])
-        fable = r.resolve_agents(r.parse_request('[a] claude fable high'), review, 'codex')[0]
-        self.assertEqual((fable.model, fable.effort), ('claude-fable-5-1', 'high'))
+        sonnet = r.resolve_agents(r.parse_request('[a] claude sonnet high'), review, 'codex')[0]
+        self.assertEqual((sonnet.model, sonnet.effort), ('claude-sonnet-5-5', 'high'))
+        with self.assertRaises(ValueError):
+            r.resolve_agents(r.parse_request('[a] claude fable high'), review, 'codex')
         execution = r.load_config(host_config=cross_agent.DEFAULT_CONFIG, role='execution', profile='execution')
         writer = r.resolve_agents(r.parse_request('[a]'), execution, 'claude-code')
         self.assertEqual([(c.family, c.model, c.effort) for c in writer],
                          [('codex', 'gpt-6.1-sol', 'medium')])
         # Config allows a Claude Code writer; transport still requires an orchestrate policy.
         orchestrator = r.resolve_agents(r.parse_request('[a] claude'), execution, 'codex')[0]
-        self.assertEqual((orchestrator.family, orchestrator.profile), ('claude-code', 'execution'))
+        self.assertEqual((orchestrator.family, orchestrator.profile), ('claude-code', 'no-network'))
+
+
+def one_agent(family='codex', model='gpt-6.1-sol', **changes):
+    base = {"models": {model: ["low"]}, "default_model": model, "default_effort": "low",
+            "profiles": ["read-only", "no-network", "full"],
+            "capabilities": {"read-only": "supported", "no-network": "supported", "full": "supported"}}
+    base.update(changes)
+    return {"schema_version": 1, "agents": {family: base}}
+
+
+class ProfileConfigTests(unittest.TestCase):
+    def test_legacy_execution_spelling_reads_as_no_network(self):
+        doc = one_agent(profiles=["read-only", "execution"],
+                        capabilities={"read-only": "supported", "execution": "supported"})
+        policy = r.validate_config(doc)["codex"]
+        self.assertEqual(policy.profiles, ("read-only", "no-network"))
+        self.assertEqual(policy.capabilities, {"read-only": "supported", "no-network": "supported"})
+        config = r.load_config(host_config=doc, role="execution", profile="execution")
+        self.assertEqual(config.profile, "no-network")
+
+    def test_both_spellings_together_are_rejected(self):
+        both_profiles = one_agent(profiles=["execution", "no-network"],
+                                  capabilities={"execution": "supported", "no-network": "supported"})
+        both_caps = one_agent(profiles=["no-network"],
+                              capabilities={"execution": "supported", "no-network": "supported"})
+        for doc in (both_profiles, both_caps):
+            with self.subTest(doc=doc), self.assertRaises(ValueError):
+                r.validate_config(doc)
+
+    def test_full_is_unavailable_when_the_config_lacks_it(self):
+        doc = one_agent(profiles=["read-only", "execution"],
+                        capabilities={"read-only": "supported", "execution": "supported"})
+        config = r.load_config(host_config=doc, role="execution", profile="full")
+        with self.assertRaisesRegex(r.UnavailableError, 'profile requires verified adapter support: full'):
+            r.resolve_agents(r.parse_request("[a] codex"), config, "claude-code")
+
+    def test_full_resolves_when_supported(self):
+        config = r.load_config(host_config=one_agent(), role="execution", profile="full")
+        choice = r.resolve_agents(r.parse_request("[a] codex"), config, "claude-code")[0]
+        self.assertEqual((choice.family, choice.profile, choice.role), ("codex", "full", "execution"))
+
+    def test_role_profile_conflicts_still_fail(self):
+        with self.assertRaises(ValueError):
+            r.load_config(host_config=one_agent(), role="execution", profile="read-only")
+        with self.assertRaises(ValueError):
+            r.load_config(host_config=one_agent(), role="review", profile="full")
+
+    def test_subagent_models_are_optional_validated_and_narrow_only(self):
+        self.assertEqual(r.validate_config(one_agent())["codex"].subagent_models, ())
+        wide = one_agent(subagent_models=["gpt-6.1-terra", "gpt-6.1-lune"])
+        narrow = one_agent(subagent_models=["gpt-6.1-terra"])
+        self.assertEqual(r.validate_config(wide)["codex"].subagent_models,
+                         ("gpt-6.1-terra", "gpt-6.1-lune"))
+        r.load_config(user_config=wide, host_config=narrow, role="review", profile="read-only")
+        with self.assertRaisesRegex(ValueError, 'widens subagent models'):
+            r.load_config(user_config=narrow, host_config=wide, role="review", profile="read-only")
+        for bad in ([], ["a", "a"], "gpt-6.1-terra", [1], ["-x"]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                r.validate_config(one_agent(subagent_models=bad))
+
+    def test_subagent_only_model_cannot_be_launched(self):
+        doc = one_agent(subagent_models=["gpt-6.1-lune"])
+        config = r.load_config(host_config=doc, role="review", profile="read-only")
+        with self.assertRaisesRegex(ValueError, 'allowed only as a subagent'):
+            r.resolve_agents(r.parse_request("[a] codex lune"), config, "claude-code")
+
+    def test_default_recipients_skip_families_that_are_not_supported(self):
+        doc = one_agent()
+        doc["agents"]["antigravity"] = one_agent("antigravity", "gemini-4-argon",
+            capabilities={"read-only": "requires-live-probe", "no-network": "requires-live-probe",
+                          "full": "requires-live-probe"})["agents"]["antigravity"]
+        config = r.load_config(host_config=doc, role="review", profile="read-only")
+        self.assertEqual([c.family for c in r.resolve_agents(r.parse_request("[a]"), config, "claude-code")],
+                         ["codex"])
+        with self.assertRaises(r.UnavailableError):
+            r.resolve_agents(r.parse_request("[a] gemini"), config, "claude-code")
+        self.assertEqual([g.family for g in r.default_groups(config, "codex")], [])
+
+    def test_antigravity_never_runs_a_writer_profile(self):
+        doc = one_agent("antigravity", "gemini-4-argon")
+        config = r.load_config(host_config=doc, role="execution", profile="full")
+        with self.assertRaisesRegex(r.UnavailableError, 'Antigravity full has no verified scoped adapter'):
+            r.resolve_agents(r.parse_request("[a] agy"), config, "codex")
+
+    def test_lune_alias(self):
+        doc = one_agent(models={"gpt-6.1-lune": ["low"]}, default_model="gpt-6.1-lune")
+        config = r.load_config(host_config=doc, role="review", profile="read-only")
+        self.assertEqual(r.resolve_agents(r.parse_request("[a] codex lune"), config, "claude-code")[0].model,
+                         "gpt-6.1-lune")
+
+
+class DefaultConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.text = Path(cross_agent.DEFAULT_CONFIG).read_text(encoding='utf-8')
+        self.doc = json.loads(self.text)['agents']
+
+    def test_model_set_is_fixed(self):
+        levels = ['low', 'medium', 'high']
+        self.assertEqual(self.doc['claude-code']['models'],
+                         {'claude-opus-5-5': levels, 'claude-sonnet-5-5': levels})
+        self.assertEqual(self.doc['codex']['models'], {'gpt-6.1-sol': levels, 'gpt-6.1-terra': levels})
+        self.assertEqual(self.doc['antigravity']['models'],
+                         {'gemini-4-argon': levels, 'gemini-3.8-flash': levels})
+        for family, model in (('claude-code', 'claude-opus-5-5'), ('codex', 'gpt-6.1-sol'),
+                              ('antigravity', 'gemini-4-argon')):
+            self.assertEqual((self.doc[family]['default_model'], self.doc[family]['default_effort']),
+                             (model, 'medium'))
+        for gone in ('fable', 'xhigh', '"max"'):
+            self.assertNotIn(gone, self.text)
+
+    def test_subagent_models(self):
+        self.assertEqual(self.doc['claude-code']['subagent_models'], ['claude-sonnet-5-5', 'claude-haiku-5-5'])
+        self.assertEqual(self.doc['codex']['subagent_models'], ['gpt-6.1-terra', 'gpt-6.1-lune'])
+        self.assertEqual(self.doc['antigravity']['subagent_models'], ['gemini-3.8-flash'])
+        for family in ('claude-code', 'codex'):
+            self.assertFalse(set(self.doc[family]['subagent_models'][1:]) & set(self.doc[family]['models']))
+
+    def test_capabilities_and_profiles(self):
+        for family in ('claude-code', 'codex'):
+            self.assertEqual(self.doc[family]['profiles'], ['read-only', 'no-network', 'full'])
+            self.assertEqual(set(self.doc[family]['capabilities'].values()), {'supported'})
+        self.assertEqual(self.doc['antigravity']['profiles'], ['read-only', 'no-network', 'full'])
+        self.assertEqual(set(self.doc['antigravity']['capabilities'].values()), {'requires-live-probe'})
+
+    def test_default_is_valid_and_resolves(self):
+        full = r.load_config(host_config=cross_agent.DEFAULT_CONFIG, role='execution', profile='full')
+        self.assertEqual(r.resolve_agents(r.parse_request('[a] codex'), full, 'claude-code')[0].profile, 'full')
+        with self.assertRaisesRegex(ValueError, 'allowed only as a subagent'):
+            r.resolve_agents(r.parse_request('[a] claude haiku'), full, 'codex')
+        review = r.load_config(host_config=cross_agent.DEFAULT_CONFIG, role='review', profile='read-only')
+        self.assertEqual([c.family for c in r.resolve_agents(r.parse_request('[a]'), review, 'claude-code')],
+                         ['codex'])
+        with self.assertRaises(r.UnavailableError):
+            r.resolve_agents(r.parse_request('[a] gemini flash'), review, 'codex')
 
 
 if __name__ == '__main__': unittest.main()

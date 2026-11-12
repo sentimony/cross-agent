@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.8 - 2026-11-12
+
+1. `resume-check` compares a checkpoint with the worktree where it was written when it runs
+   from another worktree of the same repository. The result has `resumed_from_other_worktree`;
+   the change of place is not drift. A removed worktree gives one `worktree-removed` entry
+   (`20261110-2223`).
+
 ## 0.0.7 - 2026-11-10
 
 1. Warn through `store_warning` in `facts --json` when the store lies under a temporary

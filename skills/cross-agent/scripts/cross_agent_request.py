@@ -5,15 +5,17 @@ from pathlib import Path
 import shlex
 from typing import Mapping, Optional, Tuple
 
+from cross_agent_profiles import PROFILE_ALIASES, PROFILES, WRITER_PROFILES, canonical_profile
+
 FAMILIES = {'codex': 'codex', 'claude': 'claude-code', 'claude-code': 'claude-code',
             'gemini': 'antigravity', 'antigravity': 'antigravity', 'agy': 'antigravity'}
 ALIASES = {
-    'codex': {'sol': 'gpt-6.1-sol', 'terra': 'gpt-6.1-terra', 'astra': 'gpt-6-astra', 'luna': 'gpt-6-luna'},
+    'codex': {'sol': 'gpt-6.1-sol', 'terra': 'gpt-6.1-terra', 'astra': 'gpt-6-astra', 'luna': 'gpt-6-luna',
+              'lune': 'gpt-6.1-lune'},
     'claude-code': {'opus': 'claude-opus-5-5', 'sonnet': 'claude-sonnet-5-5',
                     'haiku': 'claude-haiku-5-5', 'fable': 'claude-fable-5-1'},
     'antigravity': {'argon': 'gemini-4-argon', 'flash': 'gemini-3.8-flash'}}
 EFFORTS = frozenset(('low', 'medium', 'high', 'xhigh', 'max'))
-PROFILES = frozenset(('read-only', 'execution'))
 STATUSES = frozenset(('supported', 'requires-live-probe', 'unavailable'))
 
 
@@ -45,6 +47,7 @@ class AgentPolicy:
     default_effort: str
     profiles: Tuple[str, ...]
     capabilities: Mapping[str, str]
+    subagent_models: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -195,6 +198,22 @@ def _pairs(pairs):
     return result
 
 
+AGENT_FIELDS = ('models', 'default_model', 'default_effort', 'profiles', 'capabilities')
+
+
+def _agent_fields(raw):
+    if (not isinstance(raw, dict) or not set(AGENT_FIELDS) <= set(raw)
+            or set(raw) - set(AGENT_FIELDS) - {'subagent_models'}):
+        raise ValueError('unknown or missing configuration fields')
+
+
+def _spelled(values):
+    """Spell a legacy profile name canonically; duplicates are then rejected by _unique."""
+    if not isinstance(values, list):
+        return values
+    return [PROFILE_ALIASES.get(v, v) if isinstance(v, str) else v for v in values]
+
+
 def validate_config(document) -> Mapping[str, AgentPolicy]:
     """Validate a JSON-shaped document, returning canonical family policies."""
     _keys(document, ('schema_version', 'agents'))
@@ -206,19 +225,27 @@ def validate_config(document) -> Mapping[str, AgentPolicy]:
     for family, raw in document['agents'].items():
         if family not in ALIASES:
             raise ValueError('config family must be canonical')
-        _keys(raw, ('models', 'default_model', 'default_effort', 'profiles', 'capabilities'))
+        _agent_fields(raw)
         if not isinstance(raw['models'], dict) or not raw['models']:
             raise ValueError('models must be a nonempty object')
         models = {_text(model): _unique(efforts, EFFORTS) for model, efforts in raw['models'].items()}
-        profiles = _unique(raw['profiles'], PROFILES)
+        profiles = _unique(_spelled(raw['profiles']), frozenset(PROFILES))
         capabilities = raw['capabilities']
+        if isinstance(capabilities, dict):
+            spelled = {PROFILE_ALIASES.get(k, k): v for k, v in capabilities.items()}
+            if len(spelled) != len(capabilities):
+                raise ValueError('duplicate capability profile')
+            capabilities = spelled
         _keys(capabilities, profiles)
         if any(not isinstance(status, str) or status not in STATUSES for status in capabilities.values()):
             raise ValueError('unsupported capability status')
         model = _text(raw['default_model']); effort = _text(raw['default_effort'])
         if model not in models or effort not in models[model]:
             raise ValueError('default model/effort not authorized')
-        policies[family] = AgentPolicy(models, model, effort, profiles, dict(capabilities))
+        subagents = ()
+        if 'subagent_models' in raw:
+            subagents = tuple(_text(m) for m in _unique(raw['subagent_models']))
+        policies[family] = AgentPolicy(models, model, effort, profiles, dict(capabilities), subagents)
     return policies
 
 
@@ -237,6 +264,8 @@ def _restrict(base, layer):
         parent = base[family]
         if not set(policy.models) <= set(parent.models) or not set(policy.profiles) <= set(parent.profiles):
             raise ValueError('configuration layer widens models or profiles')
+        if not set(policy.subagent_models) <= set(parent.subagent_models):
+            raise ValueError('configuration layer widens subagent models')
         if any(not set(efforts) <= set(parent.models[model]) for model, efforts in policy.models.items()):
             raise ValueError('configuration layer widens effort authorization')
         if any(rank[status] > rank[parent.capabilities[profile]] for profile, status in policy.capabilities.items()):
@@ -251,9 +280,10 @@ def load_config(*, host_config=None, project_config=None, user_config=None,
     No default paths are searched and no files are written. The trusted caller must
     supply classification separately. Missing all sources authorizes zero agents.
     """
-    if role not in ('consultation', 'review', 'execution') or profile not in PROFILES:
+    if role not in ('consultation', 'review', 'execution'):
         raise ValueError('trusted role/profile required')
-    if (role == 'execution') != (profile == 'execution'):
+    profile = canonical_profile(profile)
+    if (role == 'execution') != (profile in WRITER_PROFILES):
         raise ValueError('role/profile conflict')
     result = None
     for source in (user_config, project_config, host_config):
@@ -261,6 +291,14 @@ def load_config(*, host_config=None, project_config=None, user_config=None,
             layer = _load(source)
             result = layer if result is None else _restrict(result, layer)
     return AgentConfig(result or {}, role, profile)
+
+
+def default_groups(config: AgentConfig, host_family: str) -> Tuple[AgentGroup, ...]:
+    """Other configured families whose capability for the trusted profile is 'supported'."""
+    host = FAMILIES[host_family]
+    return tuple(AgentGroup(f) for f in sorted(config.agents)
+                 if f != host and config.profile in config.agents[f].profiles
+                 and config.agents[f].capabilities.get(config.profile) == 'supported')
 
 
 def resolve_agents(request: Request, config: AgentConfig, host_family: str) -> list:
@@ -272,13 +310,13 @@ def resolve_agents(request: Request, config: AgentConfig, host_family: str) -> l
     """
     if host_family not in FAMILIES:
         raise ValueError('unknown host family')
-    if config.role not in ('consultation', 'review', 'execution') or config.profile not in PROFILES or ((config.role == 'execution') != (config.profile == 'execution')):
+    if config.role not in ('consultation', 'review', 'execution') or config.profile not in PROFILES or ((config.role == 'execution') != (config.profile in WRITER_PROFILES)):
         raise ValueError('invalid trusted classification')
     host = FAMILIES[host_family]
-    groups = request.agent_groups or tuple(AgentGroup(f) for f in sorted(config.agents) if f != host)
+    groups = request.agent_groups or default_groups(config, host_family)
     if not groups:
         raise UnavailableError('no configured other agents')
-    if config.profile == 'execution' and len(groups) != 1:
+    if config.profile in WRITER_PROFILES and len(groups) != 1:
         raise ValueError('execution requires an explicit single writer choice')
     choices = []
     for group in groups:
@@ -287,11 +325,13 @@ def resolve_agents(request: Request, config: AgentConfig, host_family: str) -> l
         policy = config.agents[group.family]
         model = ALIASES[group.family].get(group.model, group.model) if group.model else policy.default_model
         effort = group.effort or policy.default_effort
+        if model in policy.subagent_models and model not in policy.models:
+            raise ValueError('model %s is allowed only as a subagent and cannot be launched' % model)
         if model not in policy.models or effort not in policy.models[model]:
             raise ValueError('unknown or unauthorized model/effort')
         if config.profile not in policy.profiles or policy.capabilities.get(config.profile) != 'supported':
-            raise UnavailableError('profile requires verified adapter support')
-        if group.family == 'antigravity' and config.profile == 'execution':
-            raise UnavailableError('Antigravity execution has no verified scoped adapter')
+            raise UnavailableError('profile requires verified adapter support: ' + config.profile)
+        if group.family == 'antigravity' and config.profile != 'read-only':
+            raise UnavailableError('Antigravity %s has no verified scoped adapter' % config.profile)
         choices.append(AgentChoice(group.family, model, effort, config.role, config.profile, group.family == host))
     return choices

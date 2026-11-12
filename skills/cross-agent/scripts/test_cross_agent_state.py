@@ -132,6 +132,37 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.choose(ctx=replace(self.ctx, active_task_ids=(first.task_id, second.task_id))).reason,
                          'AMBIGUOUS_TASK')
 
+    def test_full_and_no_network_are_separate_sessions(self):
+        writer = self.choose(role='execution', profile='no-network')
+        full = self.choose(role='execution', profile='full')
+        self.assertNotEqual(writer.session_id, full.session_id)
+        self.assertIn('PROFILE', full.reason)
+        self.assertEqual((writer.profile, full.profile), ('no-network', 'full'))
+        explicit = self.choose(Request('x', session_selector=writer.session_id),
+                               role='execution', profile='full')
+        self.assertEqual(explicit.reason, 'INCOMPATIBLE_SESSION')
+
+    def test_legacy_execution_profile_is_stored_and_resumed_as_no_network(self):
+        first = self.choose(role='execution', profile='execution')
+        self.assertEqual(first.profile, 'no-network')
+        path = Path(self.ctx.registry_path) / 'registry.json'
+        data = json.loads(path.read_text())
+        for session in data['sessions'].values():
+            if session['role'] == 'execution':
+                session['profile'] = 'execution'
+        path.write_text(json.dumps(data))
+        again = self.choose(role='execution', profile='no-network')
+        self.assertTrue(again.resume)
+        self.assertEqual(again.session_id, first.session_id)
+        (self.root / 'artifact').mkdir()
+        reserve_session(self.ctx, again, str(self.root / 'artifact'))
+
+    def test_invalid_role_profile_pairs_are_refused(self):
+        for role, profile in (('execution', 'read-only'), ('review', 'full'),
+                              ('consultation', 'no-network'), ('execution', 'bogus')):
+            with self.subTest(role=role, profile=profile), self.assertRaisesRegex(StateError, 'INVALID_ROLE_PROFILE'):
+                self.choose(role=role, profile=profile)
+
     def test_role_model_and_profile_isolation(self):
         first = self.choose()
         changed = self.choose(agent=replace(self.agent, model='other'))

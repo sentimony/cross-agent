@@ -40,6 +40,65 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(result['verdict'], 'drifted')
         self.assertIn('head', [d['kind'] for d in result['drift']])
 
+    def linked(self, name='linked'):
+        tree = Path(self.tmp.name) / name
+        git(self.repo, 'worktree', 'add', '-b', name, str(tree))
+        return tree
+
+    def args_for(self, repo):
+        return SimpleNamespace(**dict(vars(self.args), repo=str(repo)))
+
+    def write_in(self, tree):
+        draft = make_draft(tree)
+        return ct.write_checkpoint(draft, self.args_for(tree))
+
+    def test_resume_from_the_main_checkout_compares_with_the_checkpoint_worktree(self):
+        tree = self.linked()
+        path = self.write_in(tree)
+        result = ct.resume_check(str(path), self.args_for(self.repo))
+        self.assertEqual(Path(result['resumed_from_other_worktree']).resolve(), tree.resolve())
+        self.assertEqual(result['drift'], [])
+        self.assertEqual(result['verdict'], 'fresh')
+
+    def test_real_drift_in_the_checkpoint_worktree_is_still_reported(self):
+        tree = self.linked()
+        path = self.write_in(tree)
+        git(tree, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+            'commit', '--allow-empty', '-m', 'progress')
+        result = ct.resume_check(str(path), self.args_for(self.repo))
+        kinds = [d['kind'] for d in result['drift']]
+        self.assertIn('head', kinds)
+        self.assertEqual(result['verdict'], 'drifted')
+        self.assertIsNotNone(result['resumed_from_other_worktree'])
+
+    def test_removed_worktree_is_a_single_drift_record(self):
+        tree = self.linked()
+        path = self.write_in(tree)
+        git(self.repo, 'worktree', 'remove', '--force', str(tree))
+        result = ct.resume_check(str(path), self.args_for(self.repo))
+        self.assertEqual([d['kind'] for d in result['drift']], ['worktree-removed'])
+        self.assertEqual(Path(result['drift'][0]['detail']['saved']).resolve(), tree.resolve())
+        self.assertEqual(result['missing'], [])
+        self.assertIn('artifacts', result['unverified'])
+        self.assertEqual(result['verdict'], 'drifted')
+
+    def test_saved_path_that_became_a_directory_inside_another_worktree_is_removed(self):
+        nested = self.repo / 'nested-wt'
+        git(self.repo, 'worktree', 'add', '-b', 'nested', str(nested))
+        path = self.write_in(nested)
+        git(self.repo, 'worktree', 'remove', '--force', str(nested))
+        nested.mkdir()
+        result = ct.resume_check(str(path), self.args_for(self.repo))
+        self.assertEqual([d['kind'] for d in result['drift']], ['worktree-removed'])
+        self.assertEqual(result['verdict'], 'drifted')
+
+    def test_same_worktree_has_no_other_worktree_field(self):
+        path = ct.write_checkpoint(self.draft, self.args)
+        result = ct.resume_check(str(path), self.args)
+        self.assertIsNone(result['resumed_from_other_worktree'])
+        none = ct.resume_check(None, SimpleNamespace(**dict(vars(self.args), store=str(Path(self.tmp.name) / 'empty'))))
+        self.assertIsNone(none['resumed_from_other_worktree'])
+
     def test_origin_ref_drift_without_head_change(self):
         head = git(self.repo, 'rev-parse', 'HEAD').strip()
         git(self.repo, 'update-ref', 'refs/remotes/origin/main', head)

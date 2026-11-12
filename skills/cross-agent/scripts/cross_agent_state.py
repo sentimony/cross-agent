@@ -12,6 +12,8 @@ import uuid
 from contextlib import contextmanager
 from urllib.parse import quote
 
+from cross_agent_profiles import canonical_profile, profile_matches_role
+
 
 @dataclass(frozen=True)
 class TaskContext:
@@ -40,6 +42,12 @@ class SessionDecision:
 
 class StateError(ValueError):
     status = 'BLOCKED'
+
+
+def _field(session, key):
+    """Field of a stored session or a decision; a legacy 'execution' profile reads as 'no-network'."""
+    value = session[key] if isinstance(session, dict) else getattr(session, key)
+    return canonical_profile(value) if key == 'profile' else value
 
 
 def _private(st, is_dir, path, label):
@@ -176,7 +184,7 @@ def _validate(data):
                 raise ValueError()
             if (session['repo'] != data['tasks'][session['task_id']]['repo']
                     or session['role'] not in ('review', 'consultation', 'execution')
-                    or session['profile'] != ('execution' if session['role'] == 'execution' else 'read-only')
+                    or not profile_matches_role(session['role'], session['profile'])
                     or session['status'] not in ('idle', 'running', 'completed', 'failed', 'blocked')
                     or session['cli_session_id'] == ''
                     or type(session.get('adopted', False)) is not bool):
@@ -353,8 +361,9 @@ def _registry(context):
 def select_session(request, task_context, agent, role, profile):
     """Select metadata only; reserve_session must win before starting a process."""
     ctx = task_context
-    if role not in ('review', 'consultation', 'execution') or profile != ('execution' if role == 'execution' else 'read-only'):
+    if role not in ('review', 'consultation', 'execution') or not profile_matches_role(role, profile):
         raise StateError('INVALID_ROLE_PROFILE')
+    profile = canonical_profile(profile)
     if role == 'consultation' and ctx.preserve_review_role:
         role = 'review'
     def blocked(reason, task=None):
@@ -397,7 +406,7 @@ def select_session(request, task_context, agent, role, profile):
         key = dict(task_id=task_id, repo=ctx.repo, family=agent.family, model=agent.model,
                    effort=agent.effort, role=role, profile=profile)
         sessions = data['sessions']
-        compatible = [s for s in sessions.values() if all(s[k] == v for k, v in key.items())]
+        compatible = [s for s in sessions.values() if all(_field(s, k) == v for k, v in key.items())]
         if request.session_selector:
             selected = sessions.get(request.session_selector)
             if selected is None:
@@ -419,7 +428,7 @@ def select_session(request, task_context, agent, role, profile):
         siblings = [s for s in sessions.values() if s['task_id'] == task_id and s['family'] == agent.family]
         if siblings and not request.new_session:
             changed = [k.upper() for k in ('model', 'effort', 'role', 'profile')
-                       if all(s[k] != key[k] for s in siblings)]
+                       if all(_field(s, k) != key[k] for s in siblings)]
             reason = 'CHANGED_' + '_'.join(changed) if changed else 'NEW_SESSION'
         sid = str(uuid.uuid4())
         sessions[sid] = dict(key, session_id=sid, cli_session_id=None, status='idle', runs=[])
@@ -440,12 +449,12 @@ def adopt_session(context, agent, cli_session_id):
         raise StateError('INVALID_PROVIDER_SESSION')
     ctx = context
     key = dict(repo=ctx.repo, family=agent.family, model=agent.model, effort=agent.effort,
-               role=agent.role, profile=agent.profile)
+               role=agent.role, profile=canonical_profile(agent.profile))
     with _registry(ctx) as data:
         for session in data['sessions'].values():
             if session['family'] == agent.family and provider in _provider_bindings(session):
                 issue = data['tasks'][session['task_id']]['canonical_issue']
-                if all(session[k] == v for k, v in key.items()) and issue == ctx.canonical_issue:
+                if all(_field(session, k) == v for k, v in key.items()) and issue == ctx.canonical_issue:
                     return session['session_id']
                 raise StateError('PROVIDER_SESSION_OWNED')
         issue = ctx.canonical_issue
@@ -520,7 +529,7 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
         if session.get('provider_conflicts'):
             raise StateError('PROVIDER_SESSION_QUARANTINED')
         if (session['task_id'] != decision.task_id
-                or any(getattr(decision, key) != session[key]
+                or any(_field(decision, key) != _field(session, key)
                        for key in ('family', 'model', 'effort', 'role', 'profile'))
                 or decision.cli_session_id != session['cli_session_id']):
             raise StateError('INCOMPATIBLE_SESSION')

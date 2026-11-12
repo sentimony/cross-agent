@@ -1,32 +1,42 @@
 # CLI profile evidence
 
-1. Configured read-only and execution profiles require explicit host evidence. Native
+1. Configured `read-only`, `no-network` (formerly `execution`, still read as that
+   spelling) and `full` profiles require explicit host evidence. Native
    CLI presence, a model name or login state is insufficient. `requires-live-probe`
    and `unavailable` configurations never silently become supported.
 2. The extracted command builders preserve the embedded source's explicit model/effort,
    permissions and child environment contracts. They have fake-CLI fixture coverage;
    this standalone candidate has no native version/install/invocation matrix.
-3. The bundled `config/default.json` marks the Claude Code read-only and Codex
-   read-only/execution profiles `supported` on the owner's attestation; it is not probe
+3. The bundled `config/default.json` marks the Claude Code and Codex profiles `read-only`,
+   `no-network` and `full` `supported` on the owner's attestation; it is not probe
    evidence. Replace it with an explicit `--config` where that attestation does not hold.
-   No production execution policy is shipped. Codex execution needs its own host policy,
+   No production execution policy is shipped. Codex `no-network` needs its own host policy,
    not the orchestrator one: `family: codex`,
    `local_actions: ["read", "write-workspace"]`, `delegation_blocked: true`,
    `config_isolated: true`, `repo` equal to the resolved `workspace`, and non-empty
    `fresh_evidence`. A Claude Code policy (`family: claude-code`, `orchestrate`) makes
    the launcher return `UNAVAILABLE: execution needs verified scoped host policy`. The
-   Codex execution child runs with `-s workspace-write` (`sandbox_mode="workspace-write"`
+   Codex `no-network` child runs with `-s workspace-write` (`sandbox_mode="workspace-write"`
    on resume). That sandbox permits file edits in the workspace and local test runs, but
    in an observed run it gave no network (`pnpm install`, `gh` and `git fetch` fail) and
    no write access to `.git` (`git commit` fails); the child then returns
    `USER_INPUT_REQUIRED` and may leave partial artifacts such as a package-manager store.
    Do not assign Codex a task that needs network, dependency installation or commits.
-   Claude Code execution is an orchestrator profile: the host policy lists `read`,
+   Claude Code `no-network` is an orchestrator profile: the host policy lists `read`,
    `write-workspace` and `orchestrate`, with `delegation_blocked: true`; config is not
    isolated, because the child loads user, project and local settings (hooks, skills,
    instructions). It runs with `acceptEdits`, prompts denied, and `--tools` equal to
    `--allowedTools` (workspace tools, `Agent` and `Skill`), so inherited settings cannot
    add a tool; no MCP servers and no web tools. The launcher stays blocked inside it.
+   The `full` profile needs no host `policy`: the bundled config marks it `supported` on the
+   owner's attestation. Codex `full` runs with `-s danger-full-access`
+   (`sandbox_mode="danger-full-access"` on resume), so network, `.git` writes and writes
+   outside the workspace are not blocked by the sandbox. Claude Code `full` uses the
+   `no-network` tools plus `WebFetch` and `WebSearch`, keeps MCP servers denied
+   (`--strict-mcp-config`, `mcp__*` disallowed) and is not sandboxed for Bash. Neither flag
+   set is verified against a live CLI. The launcher starts the child in `workspace`, passes
+   secrets by name only and blocks nested entry; the write limit outside `workspace` is
+   cooperative and stated in the brief.
    `claude -p` reports neither model nor effort fields, and its `modelUsage` also lists
    subagent models. The requested model's presence there is a necessary condition; the
    identity rests on the launcher's own `--model` flag and is recorded as
@@ -73,9 +83,11 @@
    | Profile | Read workspace | Read outside workspace | Write | Network |
    | --- | --- | --- | --- | --- |
    | Codex `read-only` | not verified (`-s read-only`) | not verified | none by flag, not verified | not verified |
-   | Codex `execution` | not verified (`-s workspace-write`) | not verified | workspace write and `.git` denied, verified (observed run, `CHANGELOG.md`); write outside workspace not verified | none, verified (observed run, `CHANGELOG.md`) |
+   | Codex `no-network` | not verified (`-s workspace-write`) | not verified | workspace write and `.git` denied, verified (observed run, `CHANGELOG.md`); write outside workspace not verified | none, verified (observed run, `CHANGELOG.md`) |
    | Claude Code `read-only` | not verified (`Read,Grep,Glob` only) | refused before launch for `required_roots`, verified by test; CLI boundary not verified | no write tool by flag, not verified | no web or MCP tool by flag, not verified |
-   | Claude Code `execution` | not verified | not verified | workspace tools by flag, not verified | web and MCP tools denied by flag, not verified |
+   | Claude Code `no-network` | not verified | not verified | workspace tools by flag, not verified | web and MCP tools denied by flag, not verified |
+   | Codex `full` | not verified (`-s danger-full-access`) | not verified | not verified (sandbox does not confine writes) | not verified (no sandbox network limit) |
+   | Claude Code `full` | not verified | not verified | workspace tools and Bash by flag, not verified | `WebFetch`/`WebSearch` allowed by flag, MCP denied by flag, not verified |
 
    `required_roots` in the host JSON (see [configuration.md](configuration.md)) is checked
    against the Claude Code read-only profile before any process starts.
