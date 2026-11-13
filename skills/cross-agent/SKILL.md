@@ -2,7 +2,7 @@
 name: cross-agent
 description: Delegate a consultation, second opinion or installed-skill run to another agent CLI, keeping compatible sessions. Use when the user asks a different agent CLI for one of these. Review policy comes from an installed owner adapter.
 metadata:
-  version: "0.0.9"
+  version: "0.0.10"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[run|status|adopt|init-host|cancel|wait] [<agent> [model] [effort]] <[assignment]> [--mode full|no-network|read-only] [--task <id|new>] [--session <id>] [--new] [--dry-run]"
@@ -15,17 +15,17 @@ The host owns permissions, task classification, installed sources and session id
 
 ## Prepare
 
-1. Read [configuration.md](references/configuration.md) before parsing agent/model/effort
+1. Read [configuration.md](configuration.md) before parsing agent/model/effort
    selections. Both `cross-agent claude opus low [assignment]` and
    `cross-agent [assignment] claude opus low` select the same assignment.
 2. Preserve the exact assignment, using either brackets or `--assignment-file <path>`.
    Assignment flags belong to the assigned skill. Outer flags are `--task`, `--session`,
    `--new`; outer `--auto` is invalid.
    Resolve `AMBIGUOUS_SESSION` with `--new` or `--session <id>` inside the request string.
-3. Read [protocol.md](references/protocol.md) for host JSON and optional installed owner
+3. Read [protocol.md](protocol.md) for host JSON and optional installed owner
    adapter requirements. The host explicitly classifies `consultation` or `skill`;
    ambiguous classification returns `USER_INPUT_REQUIRED` before dispatch.
-4. Read [skill-context.md](references/skill-context.md) for an explicit skill. Resolve
+4. Read [skill-context.md](skill-context.md) for an explicit skill. Resolve
    only host-allowlisted resources relative to its installed base. Missing/denied
    resources return `UNAVAILABLE`; never install a missing dependency implicitly.
 5. Use only configured agents and verified profiles. Without `--config` the launcher
@@ -38,7 +38,7 @@ The host owns permissions, task classification, installed sources and session id
    needs network, dependency installation or commits; the owner chose it as the default on
    2026-11-07. `--mode no-network` is a deliberate narrowing: a Codex executor then runs in a
    `workspace-write` sandbox without network and without write access to `.git` (see
-   [cli-runtime.md](references/cli-runtime.md)), needs the verified host `policy`, and gets a
+   [cli-runtime.md](cli-runtime.md)), needs the verified host `policy`, and gets a
    warning in the result; give it only file edits and local test runs. `--mode` only narrows
    the host profile, never widens it; a `consultation` or `review` host stays `read-only`.
 7. When the task must read paths outside `workspace`, list them in `required_roots`: a
@@ -85,17 +85,17 @@ The host owns permissions, task classification, installed sources and session id
 
 2. Keep a stable conversation ID, canonical repository/issue identity, private registry
    and artifact roots (directories created with `mkdir -m 700`, see
-   [protocol.md](references/protocol.md)). `--task new` separates a task; `--new`
+   [protocol.md](protocol.md)). `--task new` separates a task; `--new`
    refreshes only its session. Explicit `--session` has exactly one recipient.
    Incompatible identities block resume. Write each launched run's registry `session_id`
    (and `cli_session_id` when known), the role and the status into the host's own journal
    at launch, not afterwards: resuming a session later needs the ID. Open
-   [sessions.md](references/sessions.md) for `status`, `adopt`, `cancel`, `wait`, `--label`,
+   [sessions.md](sessions.md) for `status`, `adopt`, `cancel`, `wait`, `--label`,
    `--dry-run`, host defaults and the cost estimate. An orchestrator asks the owner through
    `USER_INPUT_REQUIRED`; a `BLOCKED` result takes its reason from the first output line. A
    `CONSULTATION_REQUIRED` or `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps
    its status with `handoff_invalid: true`: read the question from `output` and answer the
-   same session. Codex resume needs the provider rollout ([CLI runtime](references/cli-runtime.md)).
+   same session. Codex resume needs the provider rollout ([CLI runtime](cli-runtime.md)).
 3. Multiple read-only recipients share one host snapshot; execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.

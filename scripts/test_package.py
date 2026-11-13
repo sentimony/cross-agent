@@ -8,7 +8,7 @@ class PackageTests(unittest.TestCase):
         docs={}
         for name in HIDDEN_PATHS:
             docs[name]=json.loads((ROOT/name).read_text())
-            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.9'),name)
+            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.10'),name)
         codex=docs['.codex-plugin/plugin.json']
         self.assertEqual(codex['skills'],'./skills/')
         self.assertTrue(codex['interface'])
@@ -30,13 +30,14 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn(name,listed)
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.9'), ('transfer-context', '0.0.9')):
+        for name, version in (('cross-agent', '0.0.10'), ('transfer-context', '0.0.10')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])
             self.assertEqual((ROOT/'LICENSE').read_bytes(),(skill/'LICENSE').read_bytes())
             self.assertIn('## 0.0.1',(skill/'CHANGELOG.md').read_text())
-            for link in re.findall(r'\]\((references/[^)]+)\)',text):
+            self.assertFalse((skill/'references').exists(),name)
+            for link in re.findall(r'\]\(([^)#:]+\.md)\)',text):
                 self.assertTrue((skill/link).is_file(),link)
     def test_runtime_imports_are_local_or_stdlib(self):
         allowed = set('argparse ast base64 collections contextlib dataclasses datetime enum fcntl functools hashlib json math os pathlib pwd re shlex shutil signal stat subprocess sys tempfile threading time typing unicodedata urllib uuid'.split())

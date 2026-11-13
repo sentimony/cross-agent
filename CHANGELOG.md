@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.10 - 2026-11-13
+
+1. `cross-agent` 0.0.10 and `transfer-context` 0.0.10: the 11 reference files move next to
+   `SKILL.md` (flat layout, wave 7b pilot of request `20261111-2225`); links updated, no
+   content change.
+2. `scripts/test_package.py` checks that every relative `.md` link in `SKILL.md` resolves and
+   that no `references/` directory remains.
+3. The three platform manifests carry `0.0.10`.
+
 ## 0.0.9 - 2026-11-13
 
 1. `cross-agent` 0.0.9 and `transfer-context` 0.0.9: descriptions rewritten as a thesis plus

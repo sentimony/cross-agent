@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.10 - 2026-11-13
+
+1. Move the five reference files from `references/` next to `SKILL.md` and update the links;
+   no content change (request `20261111-2225`). `scripts/` stays.
+
 ## 0.0.9 - 2026-11-13
 
 1. Rewrite the `description` as a thesis followed by "Use when ..." with fewer tokens; no
