@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.9 - 2026-11-13
+
+1. Rewrite the `description` as a thesis followed by "Use when ..." with fewer tokens; no
+   behavior change (requests `20261009-2359`, `20261111-2220`).
+
 ## 0.0.8 - 2026-11-12
 
 1. Add the profiles `full` (the default for an execution run), `no-network` (the former

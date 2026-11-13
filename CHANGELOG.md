@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.9 - 2026-11-13
+
+1. `cross-agent` 0.0.9 and `transfer-context` 0.0.9: descriptions rewritten as a thesis plus
+   "Use when ..." with fewer tokens (requests `20261009-2359`, `20261111-2220`).
+2. The three platform manifests carry `0.0.9`.
+
 ## 0.0.8 - 2026-11-12
 
 1. `cross-agent` 0.0.8: profiles `full` (default for an execution run), `no-network` and
