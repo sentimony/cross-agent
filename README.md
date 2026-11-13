@@ -3,20 +3,20 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.9`
+Version: `v0.0.10`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.9 | cross-agent, transfer-context |
+| [cross-agent](.) | 0.0.10 | cross-agent, transfer-context |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.9 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.9 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.10 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.10 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
 
 ## Overview
 
@@ -61,11 +61,11 @@ codex plugin add cross-agent@sentimony
 
 ## Documentation
 
-See [protocol](skills/cross-agent/references/protocol.md),
-[skill context](skills/cross-agent/references/skill-context.md),
-[configuration](skills/cross-agent/references/configuration.md) and
-[extraction map](skills/cross-agent/references/extraction-map.md) and
-[registry migration](skills/cross-agent/references/migration.md).
+See [protocol](skills/cross-agent/protocol.md),
+[skill context](skills/cross-agent/skill-context.md),
+[configuration](skills/cross-agent/configuration.md) and
+[extraction map](skills/cross-agent/extraction-map.md) and
+[registry migration](skills/cross-agent/migration.md).
 
 Local checks use Python standard library fixtures only:
 

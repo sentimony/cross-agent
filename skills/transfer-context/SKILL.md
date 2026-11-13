@@ -3,7 +3,7 @@ name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint. Use when the user asks to save, resume or check a checkpoint, or to hand work to a new session.
 argument-hint: "[save | resume [<path|id>] | check]"
 metadata:
-  version: "0.0.9"
+  version: "0.0.10"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -12,9 +12,9 @@ compatibility: Python 3.9+
 
 Save the current work for a later session, resume a checkpoint, or check context usage.
 The default command is `save`; also use `resume [<path|id>]` or `check`. Run
-`scripts/transfer_context.py` with Python 3.9 or newer. See [installation](references/install.md),
-[checkpoint format](references/checkpoint-format.md), optional [hooks](references/hooks.md),
-and [migration from context-transfer](references/migration.md).
+`scripts/transfer_context.py` with Python 3.9 or newer. See [installation](install.md),
+[checkpoint format](checkpoint-format.md), optional [hooks](hooks.md),
+and [migration from context-transfer](migration.md).
 
 ## Save
 
@@ -23,7 +23,7 @@ and [migration from context-transfer](references/migration.md).
    delegated sessions through the sibling launcher's `--status`; otherwise it records why
    they were not captured. Show the user `facts['store']`: a `legacy (...)` store means
    older checkpoints live there and are not migrated automatically.
-2. Write a draft in the [checkpoint format](references/checkpoint-format.md). Put decisions
+2. Write a draft in the [checkpoint format](checkpoint-format.md). Put decisions
    and constraints before history. Explicitly record relevant work and external state outside
    the current worktree. Reference artifacts by path instead of copying them.
    Include exact commands, paths, IDs and error text needed for action, and failed attempts
@@ -62,10 +62,10 @@ and [migration from context-transfer](references/migration.md).
 ## Check
 
 Run `usage --json` and act on its level (`prepare`, `refresh`, `rotate`, `ok`, `unknown`);
-levels, thresholds and flags are in [usage check](references/usage-check.md).
+levels, thresholds and flags are in [usage check](usage-check.md).
 
 `list`, `validate <path>` and `prune --keep <n> [--all]` manage checkpoints; pruning is
-explicit. See [checkpoint format](references/checkpoint-format.md).
+explicit. See [checkpoint format](checkpoint-format.md).
 
 ## Security Model
 
