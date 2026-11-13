@@ -1,9 +1,9 @@
 ---
 name: transfer-context
-description: Save and resume work across agent sessions with a verifiable checkpoint.
+description: Save and resume work across agent sessions with a verifiable checkpoint. Use when the user asks to save, resume or check a checkpoint, or to hand work to a new session.
 argument-hint: "[save | resume [<path|id>] | check]"
 metadata:
-  version: "0.0.8"
+  version: "0.0.9"
 license: MIT
 compatibility: Python 3.9+
 ---
