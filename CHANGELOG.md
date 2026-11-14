@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.11 - 2026-11-14
+
+1. `cross-agent` 0.0.11: `wait --timeout` accepts only a finite number of 0 or more (`nan`,
+   `inf` and negative values are usage errors); `cancel` refuses a process that started more
+   than 5 seconds after the run's `started_at`, or whose start cannot be read, as a reused PID
+   (follow-ups of 0.0.8; request `20261004-0011`). The Stop-gate is not added.
+2. `transfer-context` 0.0.11: `migrate [--dry-run]` copies valid checkpoints and `latest-*`
+   pointers from the legacy stores into the default store; the `store` line names it while the
+   legacy store is in use and warns when skipped legacy checkpoints remain (request
+   `20261106-1735`).
+3. The three platform manifests carry `0.0.11`.
+
 ## 0.0.10 - 2026-11-13
 
 1. `cross-agent` 0.0.10 and `transfer-context` 0.0.10: the 11 reference files move next to

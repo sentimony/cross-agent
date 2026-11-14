@@ -227,8 +227,14 @@ def store_report(store, args):
     common = Path(common)
     default = _state_store(common if common.name != '.git' else common.parent)
     if store == default:
+        left = {path.stem for source in _legacy_sources(project) for path in source.glob('*.md')
+                if path.is_file() and not path.is_symlink() and not (store / path.name).exists()}
+        if left:
+            return ('default; %d legacy checkpoint(s) are not in it and are not listed: '
+                    'run `migrate --dry-run`' % len(left))
         return 'default'
-    return 'legacy (%s); default store is empty, checkpoints are not migrated automatically' % store
+    return ('legacy (%s); default store is empty, checkpoints are not migrated automatically: '
+            'run `migrate --dry-run`, then `migrate`' % store)
 
 
 def capture_delegated(host_context):
@@ -890,6 +896,81 @@ def prune(store, keep, all_worktrees, worktree):
     return removed
 
 
+def _legacy_sources(project):
+    common = Path(project['git_common_dir'])
+    sources = [common / 'context-transfer']
+    if common.name == '.git':
+        sources.append(common.parent / 'docs' / 'context-transfer')
+    return [source for source in sources if source.is_dir() and not source.is_symlink()]
+
+
+def _checkpoint_valid(path):
+    try:
+        raw = path.read_text(encoding='utf-8')
+        meta, body = parse_checkpoint(raw)
+        project = meta.get('project')
+        root = project.get('root') if isinstance(project, dict) else None
+        errors, _ = validate_checkpoint(meta, body, root or os.getcwd(), 'checkpoint')
+        errors = [error for error in errors if ': secret pattern ' not in error] + _secret_errors(raw)
+    except (ValidationError, UnicodeError, OSError):
+        return False
+    return not errors
+
+
+def migrate(args, dry_run):
+    """Copy checkpoints and latest-* pointers from the legacy stores into the default store.
+
+    Each checkpoint is validated first; one that fails, or that differs from a file already
+    in the default store, is skipped and reported. Legacy stores are never changed."""
+    if getattr(args, 'store', None) or os.environ.get('CONTEXT_TRANSFER_DIR'):
+        raise ValidationError('migrate works on the default store only: drop --store and CONTEXT_TRANSFER_DIR')
+    project = _project(args.repo)
+    if not project['git_common_dir']:
+        raise ValidationError('migrate needs a Git repository')
+    common = Path(project['git_common_dir'])
+    target = _state_store(common if common.name != '.git' else common.parent)
+    sources = _legacy_sources(project)
+    copied, pointers, skipped = [], [], []
+
+    def put(name, data):
+        destination = target / name
+        if destination.is_file() and destination.read_bytes() == data:
+            return False
+        if destination.exists():
+            return None
+        if not dry_run:
+            target.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target.chmod(0o700)
+            _atomic_write(destination, data)
+        return True
+
+    for source in sources:
+        for path in sorted(source.glob('*.md')):
+            if path.is_symlink() or not path.is_file() or path.stem in copied:
+                continue
+            if not _checkpoint_valid(path):
+                skipped.append({'id': path.stem, 'reason': 'invalid checkpoint', 'path': str(path)})
+            else:
+                done = put(path.name, path.read_bytes())
+                if done is None:
+                    skipped.append({'id': path.stem, 'reason': 'target differs', 'path': str(path)})
+                elif done:
+                    copied.append(path.stem)
+    present = set(copied) | {p.stem for p in target.glob('*.md')} if target.is_dir() else set(copied)
+    for source in sources:
+        for path in sorted(source.glob('latest-*')):
+            if path.is_symlink() or not path.is_file() or path.name in pointers:
+                continue
+            if path.read_text(encoding='utf-8').strip() not in present:
+                skipped.append({'id': path.name, 'reason': 'pointer target not migrated', 'path': str(path)})
+            elif put(path.name, path.read_bytes()):
+                pointers.append(path.name)
+            elif (target / path.name).read_bytes() != path.read_bytes():
+                skipped.append({'id': path.name, 'reason': 'target differs', 'path': str(path)})
+    return {'dry_run': dry_run, 'target': str(target), 'sources': [str(s) for s in sources],
+            'copied': copied, 'pointers': pointers, 'skipped': skipped}
+
+
 def _common(parser):
     parser.add_argument('--repo', default=argparse.SUPPRESS)
     parser.add_argument('--store', default=argparse.SUPPRESS)
@@ -900,7 +981,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     _common(parser)
     subs = parser.add_subparsers(dest='command', required=True)
-    for name in ('facts', 'usage', 'write', 'validate', 'resume-check', 'list', 'prune'):
+    for name in ('facts', 'usage', 'write', 'validate', 'resume-check', 'list', 'prune', 'migrate'):
         sub = subs.add_parser(name)
         _common(sub)
         if name in ('facts', 'write'):
@@ -916,6 +997,8 @@ def main(argv=None):
             sub.add_argument('path')
         if name == 'resume-check':
             sub.add_argument('path', nargs='?')
+        if name == 'migrate':
+            sub.add_argument('--dry-run', action='store_true')
         if name == 'prune':
             sub.add_argument('--keep', type=int, required=True)
             sub.add_argument('--all', action='store_true')
@@ -933,6 +1016,10 @@ def main(argv=None):
                 result = {'removed': [str(path) for path in prune(store, args.keep, args.all, tree)]}
             print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
             return 0
+        if args.command == 'migrate':
+            result = migrate(args, args.dry_run)
+            print(json.dumps(result, ensure_ascii=True, indent=None if getattr(args, 'json', False) else 2))
+            return 1 if result['skipped'] else 0
         if args.command == 'resume-check':
             result = resume_check(args.path, args)
             result['store'] = store_report(resolve_store(args), args)

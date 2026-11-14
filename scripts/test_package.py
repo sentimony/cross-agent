@@ -8,7 +8,7 @@ class PackageTests(unittest.TestCase):
         docs={}
         for name in HIDDEN_PATHS:
             docs[name]=json.loads((ROOT/name).read_text())
-            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.10'),name)
+            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.11'),name)
         codex=docs['.codex-plugin/plugin.json']
         self.assertEqual(codex['skills'],'./skills/')
         self.assertTrue(codex['interface'])
@@ -30,7 +30,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn(name,listed)
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.10'), ('transfer-context', '0.0.10')):
+        for name, version in (('cross-agent', '0.0.11'), ('transfer-context', '0.0.11')):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])

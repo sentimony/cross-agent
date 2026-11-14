@@ -2,7 +2,7 @@
 name: cross-agent
 description: Delegate a consultation, second opinion or installed-skill run to another agent CLI, keeping compatible sessions. Use when the user asks a different agent CLI for one of these. Review policy comes from an installed owner adapter.
 metadata:
-  version: "0.0.10"
+  version: "0.0.11"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[run|status|adopt|init-host|cancel|wait] [<agent> [model] [effort]] <[assignment]> [--mode full|no-network|read-only] [--task <id|new>] [--session <id>] [--new] [--dry-run]"

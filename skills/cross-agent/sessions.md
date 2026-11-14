@@ -51,9 +51,12 @@
    records `CANCELLED` (reason `SIGNAL`); a signal that lands before the child starts is
    recorded the same way. Refusals are `BLOCKED` with the reason
    `UNKNOWN_SESSION`, `NOT_RUNNING` (also when the process vanishes before the signal) or
-   `PID_MISMATCH`. Only the same OS user can signal, and a reused PID is a
-   residual risk that the command-line check lowers but does not remove.
-2. `wait <session_id> --timeout <seconds>` polls the registry every 2 seconds until the run
+   `PID_MISMATCH`. Only the same OS user can signal. A process that started more than 5
+   seconds after the run's `started_at` (from `ps` elapsed time, 1 s resolution) or whose
+   start time cannot be read is refused as a reused PID. A reused PID whose command line is
+   also a launcher and which started within that window is a residual risk.
+2. `wait <session_id> --timeout <seconds>` (a finite number, 0 or more; `nan`, `inf` and
+   negative values are usage errors) polls the registry every 2 seconds until the run
    leaves `running` (or its process is gone) and its `result.json` exists on disk, then prints
    the status row with `waited_seconds` and `timed_out`. The launcher writes `result.json`
    after it records the state, so a finished run without the file keeps `wait` polling until

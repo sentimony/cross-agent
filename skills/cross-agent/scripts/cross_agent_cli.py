@@ -3,6 +3,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -27,6 +28,7 @@ from cross_agent_state import StateError, TaskContext
 SUBCOMMANDS = ('run', 'status', 'adopt', 'init-host', 'cancel', 'wait')
 GIT = 'git'
 PS = '/bin/ps'
+START_TOLERANCE_SECONDS = 5  # etime has 1 s resolution; the clocks are read at different moments
 HOST_FAMILIES = ('claude-code', 'codex')
 UNKNOWN_FAMILY = 'host family unknown: pass --host-family claude-code|codex or --host-context'
 
@@ -169,6 +171,29 @@ def _launcher_command(pid):
     return done.stdout.strip() if done.returncode == 0 else ''
 
 
+def _parse_etime(text):
+    """Seconds from a ps etime value ([[dd-]hh:]mm:ss), or None when it does not parse."""
+    days, _, clock = text.strip().rpartition('-') if '-' in text else ('0', '', text.strip())
+    parts = clock.split(':')
+    if not 1 <= len(parts) <= 3 or not all(part.isdigit() for part in parts) or not days.isdigit():
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return int(days) * 86400 + seconds
+
+
+def _process_start(pid):
+    """Approximate start time of a process (epoch seconds, +-1 s), or None when unreadable."""
+    try:
+        done = subprocess.run([PS, '-o', 'etime=', '-p', str(pid)], capture_output=True, text=True,
+                              check=False)
+    except OSError:
+        return None
+    elapsed = _parse_etime(done.stdout) if done.returncode == 0 else None
+    return None if elapsed is None else time.time() - elapsed
+
+
 def _session_and_run(host, session_id):
     data = state_store.read_registry(host.task_context)
     session = data['sessions'].get(session_id)
@@ -187,7 +212,7 @@ def _is_launcher(command_line):
     return os.path.basename(script) == 'cross_agent.py'
 
 
-def cancel(host, session_id, kill=os.kill, command=_launcher_command):
+def cancel(host, session_id, kill=os.kill, command=_launcher_command, started=_process_start):
     session, run = _session_and_run(host, session_id)
     if session is None:
         return _blocked('UNKNOWN_SESSION')
@@ -201,6 +226,11 @@ def cancel(host, session_id, kill=os.kill, command=_launcher_command):
     except PermissionError:
         return _blocked('PID_MISMATCH')
     if not _is_launcher(command(pid)):
+        return _blocked('PID_MISMATCH')
+    # The launcher records started_at after it has started, so a process that began later
+    # than the run is a different one that reused the PID. An unreadable start fails closed.
+    begun = started(pid)
+    if begun is None or begun > run['started_at'] + START_TOLERANCE_SECONDS:
         return _blocked('PID_MISMATCH')
     try:
         kill(pid, signal.SIGTERM)
@@ -227,6 +257,16 @@ def wait(host, session_id, timeout, interval=2.0, sleep=time.sleep, clock=time.m
         if waited >= timeout:
             return 3, dict(row, waited_seconds=waited, timed_out=True)
         sleep(min(interval, max(0.0, timeout - waited)))
+
+
+def _timeout_seconds(text):
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError('--timeout must be a finite number of seconds, 0 or more: ' + text)
+    return value
 
 
 def _emit(document, **dump):
@@ -276,7 +316,7 @@ def build_parser(command):
         parser.add_argument('session_id')
     elif command == 'wait':
         parser.add_argument('session_id')
-        parser.add_argument('--timeout', type=float, required=True)
+        parser.add_argument('--timeout', type=_timeout_seconds, required=True)
     return parser
 
 
