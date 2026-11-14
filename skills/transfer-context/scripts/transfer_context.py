@@ -227,6 +227,11 @@ def store_report(store, args):
     common = Path(common)
     default = _state_store(common if common.name != '.git' else common.parent)
     if store == default:
+        left = {path.stem for source in _legacy_sources(project) for path in source.glob('*.md')
+                if path.is_file() and not path.is_symlink() and not (store / path.name).exists()}
+        if left:
+            return ('default; %d legacy checkpoint(s) are not in it and are not listed: '
+                    'run `migrate --dry-run`' % len(left))
         return 'default'
     return ('legacy (%s); default store is empty, checkpoints are not migrated automatically: '
             'run `migrate --dry-run`, then `migrate`' % store)
@@ -944,11 +949,11 @@ def migrate(args, dry_run):
             if path.is_symlink() or not path.is_file() or path.stem in copied:
                 continue
             if not _checkpoint_valid(path):
-                skipped.append({'id': path.stem, 'reason': 'invalid checkpoint'})
+                skipped.append({'id': path.stem, 'reason': 'invalid checkpoint', 'path': str(path)})
             else:
                 done = put(path.name, path.read_bytes())
                 if done is None:
-                    skipped.append({'id': path.stem, 'reason': 'target differs'})
+                    skipped.append({'id': path.stem, 'reason': 'target differs', 'path': str(path)})
                 elif done:
                     copied.append(path.stem)
     present = set(copied) | {p.stem for p in target.glob('*.md')} if target.is_dir() else set(copied)
@@ -957,11 +962,11 @@ def migrate(args, dry_run):
             if path.is_symlink() or not path.is_file() or path.name in pointers:
                 continue
             if path.read_text(encoding='utf-8').strip() not in present:
-                skipped.append({'id': path.name, 'reason': 'pointer target not migrated'})
+                skipped.append({'id': path.name, 'reason': 'pointer target not migrated', 'path': str(path)})
             elif put(path.name, path.read_bytes()):
                 pointers.append(path.name)
             elif (target / path.name).read_bytes() != path.read_bytes():
-                skipped.append({'id': path.name, 'reason': 'target differs'})
+                skipped.append({'id': path.name, 'reason': 'target differs', 'path': str(path)})
     return {'dry_run': dry_run, 'target': str(target), 'sources': [str(s) for s in sources],
             'copied': copied, 'pointers': pointers, 'skipped': skipped}
 

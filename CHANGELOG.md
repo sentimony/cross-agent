@@ -7,8 +7,9 @@
    than 5 seconds after the run's `started_at`, or whose start cannot be read, as a reused PID
    (follow-ups of 0.0.8; request `20261004-0011`). The Stop-gate is not added.
 2. `transfer-context` 0.0.11: `migrate [--dry-run]` copies valid checkpoints and `latest-*`
-   pointers from the legacy stores into the default store, and the `store: legacy` line names
-   it (request `20261106-1735`).
+   pointers from the legacy stores into the default store; the `store` line names it while the
+   legacy store is in use and warns when skipped legacy checkpoints remain (request
+   `20261106-1735`).
 3. The three platform manifests carry `0.0.11`.
 
 ## 0.0.10 - 2026-11-13

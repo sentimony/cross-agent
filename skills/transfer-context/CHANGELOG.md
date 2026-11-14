@@ -3,7 +3,7 @@
 ## 0.0.11 - 2026-11-14
 
 1. Add `migrate [--dry-run]` (legacy stores to the default store, validated copies, legacy
-   left untouched); the `store: legacy` line names the command.
+   left untouched); the `store` line names the command and warns about skipped legacy files.
 
 ## 0.0.10 - 2026-11-13
 

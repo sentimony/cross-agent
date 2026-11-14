@@ -78,7 +78,7 @@ class MigrateTests(unittest.TestCase):
         target.write_text('different')
         conflict = self.cli('migrate')
         self.assertEqual(conflict.returncode, 1)
-        self.assertEqual(json.loads(conflict.stdout)['skipped'], [{'id': path.stem, 'reason': 'target differs'}])
+        self.assertEqual(json.loads(conflict.stdout)['skipped'], [{'id': path.stem, 'reason': 'target differs', 'path': str(self.legacy / path.name)}])
         self.assertEqual(target.read_text(), 'different')
 
     def test_invalid_and_symlinked_checkpoints_are_skipped(self):
@@ -87,7 +87,8 @@ class MigrateTests(unittest.TestCase):
         (self.legacy / '20260101T000000Z-bbbbbbbb.md').symlink_to(good)
         report = json.loads(self.cli('migrate').stdout)
         self.assertEqual(report['copied'], [good.stem])
-        self.assertEqual(report['skipped'], [{'id': '20260101T000000Z-aaaaaaaa', 'reason': 'invalid checkpoint'}])
+        self.assertEqual(report['skipped'], [{'id': '20260101T000000Z-aaaaaaaa', 'reason': 'invalid checkpoint',
+                                     'path': str(self.legacy / '20260101T000000Z-aaaaaaaa.md')}])
         self.assertEqual(sorted(p.name for p in self.default_store().glob('*.md')), [good.name])
 
     def test_docs_legacy_store_is_a_source_and_custom_store_is_refused(self):
@@ -103,6 +104,19 @@ class MigrateTests(unittest.TestCase):
                                 capture_output=True, text=True, env=self.env)
         self.assertEqual(custom.returncode, 1)
         self.assertIn('default store', custom.stdout)
+
+    def test_store_line_warns_about_skipped_legacy_checkpoints(self):
+        self.write_legacy()
+        (self.legacy / '20260101T000000Z-aaaaaaaa.md').write_text('broken')
+        self.assertEqual(self.cli('migrate').returncode, 1)
+        args = argparse.Namespace(repo=str(self.repo), store=None)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            report = ct.store_report(ct.resolve_store(args), args)
+        self.assertTrue(report.startswith('default;'), report)
+        self.assertIn('1 legacy checkpoint', report)
+        self.assertIn('migrate --dry-run', report)
+        skipped = json.loads(self.cli('migrate').stdout)['skipped']
+        self.assertEqual(skipped[0]['path'], str(self.legacy / '20260101T000000Z-aaaaaaaa.md'))
 
     def test_store_line_names_the_migrate_command(self):
         self.write_legacy()

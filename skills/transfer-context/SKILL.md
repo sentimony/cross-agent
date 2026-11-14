@@ -67,7 +67,8 @@ levels, thresholds and flags are in [usage check](usage-check.md).
 `list`, `validate <path>` and `prune --keep <n> [--all]` manage checkpoints; pruning is
 explicit. `migrate [--dry-run]` copies valid checkpoints and `latest-*` pointers from the
 legacy stores into the default store (private modes, legacy left untouched, conflicts and
-invalid files reported, exit 1 when any was skipped). See [checkpoint format](checkpoint-format.md).
+invalid files reported with their source path, exit 1 when any was skipped; the `store`
+line keeps warning while a legacy checkpoint is missing from the default store). See [checkpoint format](checkpoint-format.md).
 
 ## Security Model
 
