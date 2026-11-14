@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.11 - 2026-11-14
+
+1. Add `migrate [--dry-run]` (legacy stores to the default store, validated copies, legacy
+   left untouched); the `store: legacy` line names the command.
+
 ## 0.0.10 - 2026-11-13
 
 1. Move the five reference files from `references/` next to `SKILL.md` and update the links;

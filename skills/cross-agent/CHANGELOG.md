@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.11 - 2026-11-14
+
+1. `wait --timeout` accepts only a finite number of 0 or more; `cancel` also compares the
+   process start time with the run's `started_at` and refuses a likely reused PID
+   (`PID_MISMATCH`).
+
 ## 0.0.10 - 2026-11-13
 
 1. Move the seven reference files from `references/` next to `SKILL.md` and update the links;

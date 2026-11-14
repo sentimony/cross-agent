@@ -388,6 +388,53 @@ class CancelTests(ControlFixture):
         self.assertEqual((answer['status'], answer['reason']), ('BLOCKED', 'NOT_RUNNING'))
 
 
+class CancelStartTimeTests(ControlFixture):
+    def test_process_started_after_the_run_is_a_reused_pid(self):
+        self.start_run()
+        sent = []
+        run_started = cli._session_and_run(self.host, self.decision.session_id)[1]['started_at']
+        command = lambda pid: 'python3 /x/cross_agent.py run'
+        for label, started, expected in (('later', run_started + 3600, 'PID_MISMATCH'),
+                                         ('unreadable', None, 'PID_MISMATCH'),
+                                         ('earlier', run_started - 60, None),
+                                         ('within tolerance', run_started + 1, None)):
+            with self.subTest(label=label):
+                answer = cli.cancel(self.host, self.decision.session_id,
+                                    kill=lambda pid, sig: sent.append(pid), command=command,
+                                    started=lambda pid, started=started: started)
+                self.assertEqual(answer.get('reason'), expected)
+        self.assertEqual(sent, [os.getpid()] * 2)
+
+    def test_elapsed_time_parsing(self):
+        self.assertEqual(cli._parse_etime('05'), 5)
+        self.assertEqual(cli._parse_etime('01:05'), 65)
+        self.assertEqual(cli._parse_etime('2:01:05'), 7265)
+        self.assertEqual(cli._parse_etime('3-02:01:05'), 3 * 86400 + 7265)
+        for bad in ('', 'x', '1:2:3:4', '-1', '1-x'):
+            with self.subTest(bad=bad):
+                self.assertIsNone(cli._parse_etime(bad))
+
+    def test_real_process_start_is_close_to_now(self):
+        if not os.path.exists(cli.PS):
+            self.skipTest('/bin/ps is required')
+        started = cli._process_start(os.getpid())
+        self.assertIsNotNone(started)
+        self.assertLessEqual(started, time.time() + 2)
+
+
+class WaitTimeoutArgumentTests(CliFixture):
+    def test_non_finite_or_negative_timeout_is_a_usage_error(self):
+        for value in ('nan', 'inf', '-inf', '-1', 'abc'):
+            with self.subTest(value=value):
+                result, _ = self.run_cli('wait', 'sid', '--timeout', value)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('--timeout', result.stderr)
+
+    def test_zero_and_positive_timeouts_are_accepted_by_the_parser(self):
+        for value in ('0', '2.5'):
+            self.assertEqual(cli.build_parser('wait').parse_args(['sid', '--timeout', value]).timeout, float(value))
+
+
 class EarlyCancelTests(ControlFixture):
     def test_sigterm_between_reservation_and_launch_is_recorded(self):
         def interrupted(*args, **kwargs):

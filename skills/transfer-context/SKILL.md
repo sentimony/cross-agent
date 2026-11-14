@@ -3,7 +3,7 @@ name: transfer-context
 description: Save and resume work across agent sessions with a verifiable checkpoint. Use when the user asks to save, resume or check a checkpoint, or to hand work to a new session.
 argument-hint: "[save | resume [<path|id>] | check]"
 metadata:
-  version: "0.0.10"
+  version: "0.0.11"
 license: MIT
 compatibility: Python 3.9+
 ---
@@ -22,7 +22,7 @@ and [migration from context-transfer](migration.md).
    Pass `--host-context <json>` when the host has a cross-agent context. The script reads
    delegated sessions through the sibling launcher's `--status`; otherwise it records why
    they were not captured. Show the user `facts['store']`: a `legacy (...)` store means
-   older checkpoints live there and are not migrated automatically.
+   older checkpoints live there; offer `migrate --dry-run` and, on approval, `migrate`.
 2. Write a draft in the [checkpoint format](checkpoint-format.md). Put decisions
    and constraints before history. Explicitly record relevant work and external state outside
    the current worktree. Reference artifacts by path instead of copying them.
@@ -65,7 +65,9 @@ Run `usage --json` and act on its level (`prepare`, `refresh`, `rotate`, `ok`, `
 levels, thresholds and flags are in [usage check](usage-check.md).
 
 `list`, `validate <path>` and `prune --keep <n> [--all]` manage checkpoints; pruning is
-explicit. See [checkpoint format](checkpoint-format.md).
+explicit. `migrate [--dry-run]` copies valid checkpoints and `latest-*` pointers from the
+legacy stores into the default store (private modes, legacy left untouched, conflicts and
+invalid files reported, exit 1 when any was skipped). See [checkpoint format](checkpoint-format.md).
 
 ## Security Model
 
