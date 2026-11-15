@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.12 - 2026-11-15
+
+1. `prepare` accepts an optional `brief_metrics` object next to `accepted` and `context`: it is
+   stored on the run in the session state and shown in `--status` (`null` when absent); a
+   non-object value is rejected naming the field.
+2. The brief of a resumed run names the host-supplied rows `Prior dispositions (author per
+   row)` (was `Prior host dispositions`); the rows pass through unchanged, and a row may carry
+   `decided_by` (`host` or `owner`, an `owner` row with the date and the owner's words). Rows
+   without `decided_by` are still accepted (request `20261112-1757`).
+3. `SKILL.md` names `transfer-context` as an optional separately installed skill, now in
+   `sentimony/skills`.
 ## 0.0.11 - 2026-11-14
 
 1. `wait --timeout` accepts only a finite number of 0 or more; `cancel` also compares the

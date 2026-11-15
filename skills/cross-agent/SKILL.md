@@ -2,7 +2,7 @@
 name: cross-agent
 description: Delegate a consultation, second opinion or installed-skill run to another agent CLI, keeping compatible sessions. Use when the user asks a different agent CLI for one of these. Review policy comes from an installed owner adapter.
 metadata:
-  version: "0.0.11"
+  version: "0.0.12"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[run|status|adopt|init-host|cancel|wait] [<agent> [model] [effort]] <[assignment]> [--mode full|no-network|read-only] [--task <id|new>] [--session <id>] [--new] [--dry-run]"
@@ -114,8 +114,8 @@ The host owns permissions, task classification, installed sources and session id
    `FAILED`, `BLOCKED`, `UNAVAILABLE`, `CANCELLED` retain partial evidence and coverage gaps.
    Each result records `profile`, `granted` (what the launcher's flags allow, not what the
    child did) and `actions_observed: null`.
-   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with `transfer-context`.
-   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with `transfer-context`.
+   For `BLOCKED` caused by `INCOMPATIBLE_SESSION`, transfer state to a new session with the optional, separately installed `transfer-context` skill (now in `sentimony/skills`).
+   For `FAILED` caused by `TIMEOUT`, transfer state to a new session with the optional, separately installed `transfer-context` skill (now in `sentimony/skills`).
 
 ## Security Model
 

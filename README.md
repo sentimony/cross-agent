@@ -3,20 +3,19 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.11`
+Version: `v0.0.12`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.11 | cross-agent, transfer-context |
+| [cross-agent](.) | 0.0.12 | cross-agent |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.11 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
-| [transfer-context](skills/transfer-context/SKILL.md) | 0.0.11 | `/transfer-context` | Save and resume work across agent sessions with a verifiable checkpoint. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.12 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
 
 ## Overview
 
@@ -27,8 +26,10 @@ Version: `v0.0.11`
    Arguments inside the brackets belong to the assigned skill; outer `--auto` is invalid.
 3. Basic delegation has no workflow dependency. An installed owner adapter supplies
    optional domain rules, validates the result and performs domain intake.
-4. The separate [transfer-context skill](skills/transfer-context/SKILL.md) saves and resumes
-   work across sessions with a verifiable checkpoint.
+4. The `transfer-context` skill (checkpoints for resuming work across sessions) moved to
+   [`sentimony/skills`](https://github.com/sentimony/skills) in plugin `skills` v0.0.112, where it
+   is version 0.0.12. It stays an optional, separately installed skill; it still looks for the
+   `cross-agent` launcher in the sibling skill directory.
 5. Since `v0.0.7` the three manifests are back (`.claude-plugin/`, `.codex-plugin/`,
    `.antigravity-plugin/`). Claude Code 2.1.322 does accept a root `plugin.json`; the
    empty plugin seen earlier came from the marketplace's `git-subdir` source with
