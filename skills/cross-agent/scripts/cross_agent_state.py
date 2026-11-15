@@ -229,6 +229,8 @@ def _validate(data):
                         raise ValueError()
                 if 'label' in run and not _label_ok(run['label']):
                     raise ValueError()
+                if 'brief_metrics' in run and not isinstance(run['brief_metrics'], dict):
+                    raise ValueError()
                 if run['status'] != 'running' and type(run['finished_at']) not in (int, float):
                     raise ValueError()
             if running > 1 or (running == 1) != (session['status'] == 'running'):
@@ -503,7 +505,8 @@ def check_label(label):
     return label
 
 
-def reserve_session(context, decision, artifact_path, launch_cli_session_id=None, label=None):
+def reserve_session(context, decision, artifact_path, launch_cli_session_id=None, label=None,
+                    brief_metrics=None):
     """Return host run UUID; atomically reject another live owner.
 
     launch_cli_session_id is the provider session ID the launcher assigns to a fresh
@@ -516,6 +519,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
         raise StateError('INVALID_ARTIFACT_PATH')
     if label is not None:
         check_label(label)
+    if brief_metrics is not None and not isinstance(brief_metrics, dict):
+        raise StateError('INVALID_UPDATE')
     if launch_cli_session_id is not None:
         if decision.cli_session_id is not None:
             raise StateError('INVALID_UPDATE')
@@ -541,6 +546,8 @@ def reserve_session(context, decision, artifact_path, launch_cli_session_id=None
             run['launch_cli_session_id'] = launch_cli_session_id
         if label is not None:
             run['label'] = label
+        if brief_metrics is not None:
+            run['brief_metrics'] = brief_metrics
         session['runs'].append(run)
         session['status'] = 'running'
         return run_id

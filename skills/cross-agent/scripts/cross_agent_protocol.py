@@ -44,8 +44,11 @@ def prepare_stop(value):
     if not isinstance(value, dict):
         raise ProtocolError('Invalid owner prepare result')
     if value.get('accepted') is True:
-        if set(value) != {'accepted', 'context'} or not isinstance(value['context'], str):
+        if (set(value) - {'accepted', 'context', 'brief_metrics'} or 'context' not in value
+                or not isinstance(value['context'], str)):
             raise ProtocolError('Invalid accepted owner context')
+        if 'brief_metrics' in value and not isinstance(value['brief_metrics'], dict):
+            raise ProtocolError('Invalid owner prepare field: brief_metrics must be an object')
         return None
     if (value.get('accepted') is not False
             or set(value) - {'accepted', 'status', 'reason', 'handoff', 'evidence'}

@@ -373,6 +373,60 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
                          {'task_selector':'new','session_selector':None,'new_session':False})
         self.assertEqual(context['review_records'],[{'path':'trusted-review'}])
 
+    BINDING={'owner_id':'fixture.owner','adapter_id':'fixture','contract_version':1,
+             'protocol_version':1,'capabilities':['prepare','validate','intake']}
+
+    def _dispatch_with_prepare(self,prepared):
+        from unittest.mock import patch
+        def call(binding,stage,host,payload,**kwargs):
+            return prepared if stage=='prepare' else {'accepted':True}
+        with patch('cross_agent.adapter_call',side_effect=call):
+            return dispatch(parse_request('codex [domain]'),replace(self.host,integration=self.BINDING))
+
+    def test_prepare_brief_metrics_is_accepted_stored_and_shown_in_status(self):
+        from cross_agent import status
+        metrics={'brief_bytes':1234,'sections':{'diff':10}}
+        result=self._dispatch_with_prepare({'accepted':True,'context':'rules','brief_metrics':metrics})
+        self.assertEqual(result.results[0]['status'],'COMPLETED')
+        rows=status(self.host)['sessions']
+        self.assertEqual([row['brief_metrics'] for row in rows],[metrics])
+
+    def test_prepare_without_brief_metrics_works_as_before(self):
+        from cross_agent import status
+        result=self._dispatch_with_prepare({'accepted':True,'context':'rules'})
+        self.assertEqual(result.results[0]['status'],'COMPLETED')
+        self.assertEqual([row['brief_metrics'] for row in status(self.host)['sessions']],[None])
+
+    def test_prepare_brief_metrics_must_be_an_object(self):
+        for bad in ('text',[1],7,None):
+            with self.subTest(bad=bad):
+                result=self._dispatch_with_prepare({'accepted':True,'context':'rules','brief_metrics':bad})
+                self.assertEqual(result.results[0]['status'],'UNAVAILABLE')
+                self.assertIn('brief_metrics',result.results[0]['reason'])
+                self.assertFalse((self.root/'registry').exists())
+
+    def test_prior_dispositions_pass_through_unchanged_with_author_heading(self):
+        rows=[{'id':'R1','decision':'rejected','reason':'x','decided_by':'host'},
+              {'id':'R2','decision':'accepted','decided_by':'owner',
+               'date':'2026-11-15','owner_words':'ok, keep it'},
+              {'id':'R3','decision':'deferred'}]
+        first=dispatch(parse_request('codex [HANDOFF]'),self.host).results[0]
+        self.assertEqual(first['status'],'CONSULTATION_REQUIRED')
+        second=dispatch(parse_request('codex [HANDOFF]'),
+                        replace(self.host,answer={'choice':'A'},prior_dispositions=rows)).results[0]
+        self.assertEqual(second['status'],'COMPLETED')
+        brief=Path(second['artifacts']['brief']).read_text()
+        self.assertIn('Prior dispositions (author per row):\n'+json.dumps(rows),brief)
+        self.assertNotIn('Prior host dispositions',brief)
+
+    def test_prior_dispositions_row_without_author_is_still_accepted(self):
+        rows=[{'id':'R1','decision':'rejected'}]
+        dispatch(parse_request('codex [HANDOFF]'),self.host)
+        second=dispatch(parse_request('codex [HANDOFF]'),
+                        replace(self.host,answer={'choice':'A'},prior_dispositions=rows)).results[0]
+        self.assertEqual(second['status'],'COMPLETED')
+        self.assertIn(json.dumps(rows),Path(second['artifacts']['brief']).read_text())
+
     def test_typed_owner_prepare_stop_never_mutates_or_launches(self):
         from unittest.mock import patch
         binding={'owner_id':'fixture.owner','adapter_id':'fixture', 'contract_version':1,
