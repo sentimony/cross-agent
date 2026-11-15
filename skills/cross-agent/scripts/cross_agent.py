@@ -50,6 +50,7 @@ class HostContext:
     owner_context: dict = field(default_factory=dict)
     skill_context: object = None
     prior_dispositions: object = None
+    brief_metrics: object = None
     required_roots: tuple = ()
     label: object = None
 
@@ -544,7 +545,8 @@ def dispatch(request, host_context):
             stop = prepare_stop(prepared)
             if stop is not None:
                 return DispatchResult(target_identity=fresh, results=[dict(stop, artifacts={})])
-            host = replace(host, domain_context=prepared['context'])
+            host = replace(host, domain_context=prepared['context'],
+                           brief_metrics=prepared.get('brief_metrics'))
         except ProtocolError as exc:
             return DispatchResult(target_identity=fresh, results=[{'status': 'UNAVAILABLE', 'reason': str(exc), 'artifacts': {}}])
     host = replace(host, skill_context=skill)
@@ -608,7 +610,7 @@ def dispatch(request, host_context):
                     review_file = prior / 'review.md'
                     if review_file.is_file():
                         brief += '\n\nPrevious output (untrusted evidence):\n' + review_file.read_text('utf-8')
-                brief += '\n\nPrior host dispositions:\n' + json.dumps(host.prior_dispositions)
+                brief += '\n\nPrior dispositions (author per row):\n' + json.dumps(host.prior_dispositions)
 
             root = Path(host.artifact_root)
             root.mkdir(mode=0o700, exist_ok=True)
@@ -628,7 +630,8 @@ def dispatch(request, host_context):
             # read the transcript of a fresh run before the provider confirms it.
             launch_id = cli_id if not resume and agent.family == 'claude-code' else None
             with _defer_sigterm():
-                run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label)
+                run_id = reserve_session(host.task_context, decision, str(run), launch_id, host.label,
+                                         host.brief_metrics)
             entry['run_id'] = run_id
             context = transport.ProfileContext(decision.task_id, host.task_context.conversation_id,
                                                decision.role, decision.profile, host.policy)
@@ -939,7 +942,7 @@ def status(host, config_dir=None):
                or session['task_id'], 'family': session['family'], 'model': session['model'],
                'effort': session['effort'], 'cli_session_id': cli,
                'launch_cli_session_id': launch, 'state': session['status'],
-               'label': run.get('label'), 'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
+               'label': run.get('label'), 'brief_metrics': run.get('brief_metrics'), 'pid': run.get('pid'), 'alive': alive, 'started_at': run.get('started_at'),
                'elapsed_seconds': _elapsed(run),
                'result_path': run.get('result_path'),
                'last_text': None, 'last_tool': None, 'last_at': None, 'estimate': None}

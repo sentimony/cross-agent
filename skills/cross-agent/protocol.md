@@ -85,7 +85,10 @@
    Payload keys cannot overwrite host-owned fields.
 6. Each response has exactly `schema_version`, `protocol_version`, `owner_id`, `adapter_id`,
    `contract_version`, `stage`, `payload`; metadata must match the trusted binding.
-   Normal `prepare.payload` has exactly `accepted: true` and a text `context`.
+   Normal `prepare.payload` has `accepted: true` and a text `context`, plus an optional
+   `brief_metrics` object (any other key is rejected; a non-object `brief_metrics` is rejected
+   naming the field). Core stores `brief_metrics` on the run in the session state and shows it
+   in `--status` (`null` when absent).
    An early stop instead has `accepted: false`, `status` equal to `USER_INPUT_REQUIRED`,
    `BLOCKED` or `UNAVAILABLE`, and a nonempty text `reason`; optional `handoff` is an
    object and `evidence` is a list. Extra/host-overriding fields are rejected.

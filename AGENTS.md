@@ -1,8 +1,9 @@
 # AGENTS.md
 
-1. This repository is the standalone `cross-agent` plugin. Keep two skill sources under
-   `skills/cross-agent/` and `skills/transfer-context/`, each with its own
-   `metadata.version`, `CHANGELOG.md`, and `LICENSE`. The version lives in three manifests
+1. This repository is the standalone `cross-agent` plugin. Keep one skill source under
+   `skills/cross-agent/` with its own `metadata.version`, `CHANGELOG.md`, and `LICENSE`.
+   `transfer-context` moved to `sentimony/skills` (plugin `skills` v0.0.112, skill 0.0.12);
+   do not add it back here. The version lives in three manifests
    (`.claude-plugin/`, `.codex-plugin/`, `.antigravity-plugin/`, each `plugin.json`);
    they must share `name` and `version`. There is no root `plugin.json`.
 2. Keep generic transport, parsing, state and protocol independent of workflow policy.

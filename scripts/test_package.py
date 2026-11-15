@@ -8,7 +8,7 @@ class PackageTests(unittest.TestCase):
         docs={}
         for name in HIDDEN_PATHS:
             docs[name]=json.loads((ROOT/name).read_text())
-            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.11'),name)
+            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.12'),name)
         codex=docs['.codex-plugin/plugin.json']
         self.assertEqual(codex['skills'],'./skills/')
         self.assertTrue(codex['interface'])
@@ -19,7 +19,7 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(anti['$schema'],'https://antigravity.google/schemas/v1/plugin.json')
         for key in ('displayName','suggestedPrompts','category'):
             self.assertTrue(anti.get(key),key)
-        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent', 'transfer-context'])
+        self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent'])
         groups=json.loads((ROOT/'skills.sh.json').read_text())['groupings']
         self.assertEqual([g['title'] for g in groups].count('Renamed skills'),1)
         self.assertEqual(groups[-1]['title'],'Renamed skills')
@@ -30,7 +30,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn(name,listed)
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.11'), ('transfer-context', '0.0.11')):
+        for name, version in (('cross-agent', '0.0.12'),):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])
@@ -41,7 +41,7 @@ class PackageTests(unittest.TestCase):
                 self.assertTrue((skill/link).is_file(),link)
     def test_runtime_imports_are_local_or_stdlib(self):
         allowed = set('argparse ast base64 collections contextlib dataclasses datetime enum fcntl functools hashlib json math os pathlib pwd re shlex shutil signal stat subprocess sys tempfile threading time typing unicodedata urllib uuid'.split())
-        for name in ('cross-agent', 'transfer-context'):
+        for name in ('cross-agent',):
             scripts = ROOT/'skills'/name/'scripts'
             local = {p.stem for p in scripts.glob('*.py') if not p.name.startswith('test_')}
             for path in scripts.glob('*.py'):

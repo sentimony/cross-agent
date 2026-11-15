@@ -1,7 +1,7 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "cross-agent",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Delegate consultations and installed skills to explicitly configured agent CLIs with persistent task and provider session identities.",
   "author": {
     "name": "Ihor Orlovskyi",
@@ -20,7 +20,7 @@
   "displayName": "Sentimony Cross-Agent",
   "suggestedPrompts": [
     "Ask Codex for an independent opinion on this plan.",
-    "Save a checkpoint of this session."
+    "Run this installed skill through Claude Code."
   ],
   "category": "Developer Tools"
 }

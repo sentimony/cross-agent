@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.12 - 2026-11-15
+
+1. `cross-agent` 0.0.12: optional `brief_metrics` object in the `prepare` response (stored in
+   the session state, shown in `--status`); the resumed brief heading is `Prior dispositions
+   (author per row)` and rows may carry `decided_by` (`host` or `owner`).
+2. `transfer-context` leaves this repository: it lives in `sentimony/skills` (plugin `skills`
+   v0.0.112) as version 0.0.12. The test runner, package tests, `skills.sh.json`, README and
+   AGENTS no longer expect it here; the skill's history stays in the entries below.
+3. The three platform manifests carry `0.0.12`.
+
 ## 0.0.11 - 2026-11-14
 
 1. `cross-agent` 0.0.11: `wait --timeout` accepts only a finite number of 0 or more (`nan`,
