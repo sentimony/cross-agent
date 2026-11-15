@@ -11,6 +11,7 @@
    without `decided_by` are still accepted (request `20261112-1757`).
 3. `SKILL.md` names `transfer-context` as an optional separately installed skill, now in
    `sentimony/skills`.
+
 ## 0.0.11 - 2026-11-14
 
 1. `wait --timeout` accepts only a finite number of 0 or more; `cancel` also compares the
