@@ -22,7 +22,7 @@ import cli_transport as transport
 import cross_agent_state as state_store
 from cross_agent_profiles import PROFILES, effective_role_profile, profile_grants
 from cross_agent_request import (FAMILIES, FORM_HINT, UnavailableError, default_groups, load_config,
-                                 parse_request, resolve_agents)
+                                 parse_request, reject_duplicate_recipients, resolve_agents)
 from cross_agent_state import StateError, TaskContext
 
 SUBCOMMANDS = ('run', 'status', 'adopt', 'init-host', 'cancel', 'wait')
@@ -138,10 +138,12 @@ def format_rows(rows):
 def dry_run(request, host):
     groups = request.agent_groups or default_groups(host.config, host.host_family)
     recipients = []
+    resolved = []
     for group in groups:
         entry = {'family': group.family}
         try:
             agent = resolve_agents(replace(request, agent_groups=(group,)), host.config, host.host_family)[0]
+            resolved.append(agent)
             entry.update(model=agent.model, effort=agent.effort, role=agent.role, profile=agent.profile,
                          granted=profile_grants(agent.family, agent.profile))
             # The same non-mutating policy check that a real launch runs before any process.
@@ -152,6 +154,7 @@ def dry_run(request, host):
         else:
             entry['available'] = True
         recipients.append(entry)
+    reject_duplicate_recipients(resolved)
     warnings = []
     if any(r['family'] == 'codex' and r.get('profile') == 'no-network' for r in recipients):
         warnings.append(core.CODEX_NO_NETWORK_WARNING)
@@ -320,15 +323,22 @@ def build_parser(command):
     return parser
 
 
+def _object(document, path):
+    """A host document must be a JSON object; anything else is a refusal, not a traceback."""
+    if not isinstance(document, dict):
+        raise Blocked('host document must be a JSON object: ' + str(path))
+    return document
+
+
 def _load_host_document(args, create_state):
     """Return the raw host document and the state directory used for a default one."""
     if args.host_context:
-        return json.loads(Path(args.host_context).read_text('utf-8'))
+        return _object(json.loads(Path(args.host_context).read_text('utf-8')), args.host_context)
     repo = Path(args.repo or os.getcwd()).resolve()
     state = state_dir(repo)
     stored = state / 'host.json'
     if stored.is_file():
-        raw = json.loads(stored.read_text('utf-8'))
+        raw = _object(json.loads(stored.read_text('utf-8')), stored)
         task = raw.get('task_context')
         if (not isinstance(task, dict) or not isinstance(raw.get('workspace'), str)
                 or not isinstance(task.get('repo'), str)

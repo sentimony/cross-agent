@@ -8,7 +8,7 @@ class PackageTests(unittest.TestCase):
         docs={}
         for name in HIDDEN_PATHS:
             docs[name]=json.loads((ROOT/name).read_text())
-            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.12'),name)
+            self.assertEqual((docs[name]['name'],docs[name]['version']),('cross-agent','0.0.13'),name)
         codex=docs['.codex-plugin/plugin.json']
         self.assertEqual(codex['skills'],'./skills/')
         self.assertTrue(codex['interface'])
@@ -21,16 +21,17 @@ class PackageTests(unittest.TestCase):
             self.assertTrue(anti.get(key),key)
         self.assertEqual(sorted(p.name for p in (ROOT/'skills').iterdir()),['cross-agent'])
         groups=json.loads((ROOT/'skills.sh.json').read_text())['groupings']
-        self.assertEqual([g['title'] for g in groups].count('Renamed skills'),1)
-        self.assertEqual(groups[-1]['title'],'Renamed skills')
-        renamed=groups[-1]['skills']
-        self.assertEqual(renamed,['context-transfer'])
-        listed=[s for g in groups[:-1] for s in g['skills']]
-        for name in renamed:
-            self.assertNotIn(name,listed)
+        self.assertEqual([g['title'] for g in groups],['Skills','Deprecated'])
+        gone=groups[-1]['skills']
+        self.assertEqual(gone,['context-transfer','transfer-context'])
+        self.assertEqual(groups[0]['skills'],['cross-agent'])
+        self.assertIn('(cross-agent)',groups[0]['description'])
+        self.assertEqual(re.findall(r'\(([^)]*)\)',groups[-1]['description']),
+                         ['context-transfer \u2192 transfer-context','transfer-context \u2192 sentimony/skills'])
+        for name in gone:
             self.assertFalse((ROOT/'skills'/name).exists(),name)
     def test_frontmatter_license_changelog_and_reference_links(self):
-        for name, version in (('cross-agent', '0.0.12'),):
+        for name, version in (('cross-agent', '0.0.13'),):
             skill=ROOT/'skills'/name; text=(skill/'SKILL.md').read_text()
             self.assertIn('name: '+name,text.split('---',2)[1])
             self.assertIn('version: "%s"' % version,text.split('---',2)[1])

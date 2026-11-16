@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.13 - 2026-11-16
+
+1. Refuse two recipients with the same family, model and effort (`duplicate recipient`) before
+   any state change or launch; `--dry-run` refuses them too. Different models or efforts of one
+   family stay allowed.
+2. A host document that is not a JSON object is `BLOCKED` (exit 2), not a traceback.
+3. `SKILL.md` notes that identical recipients are refused.
+
 ## 0.0.12 - 2026-11-15
 
 1. `prepare` accepts an optional `brief_metrics` object next to `accepted` and `context`: it is

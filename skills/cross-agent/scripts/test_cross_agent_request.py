@@ -25,6 +25,19 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(r.parse_request('claude opus low [cr-request --auto]'),
                          r.parse_request('[cr-request --auto] claude opus low'))
 
+    def test_identical_recipients_are_rejected_but_distinct_ones_pass(self):
+        cfg = self.config()
+        for text in ('[a] codex codex', '[a] codex sol low codex gpt-6.1-sol low',
+                     '[a] claude opus claude claude-opus-5-5 low'):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, 'duplicate recipient'):
+                r.resolve_agents(r.parse_request(text), cfg, 'antigravity')
+        data = document()
+        data['agents']['codex']['models']['gpt-6.1-terra'] = ['low', 'medium']
+        cfg = self.config(data)
+        self.assertEqual(len(r.resolve_agents(r.parse_request('[a] codex sol low codex sol medium'),
+                                              cfg, 'claude')), 2)
+        self.assertEqual(len(r.resolve_agents(r.parse_request('[a] codex sol codex terra'), cfg, 'claude')), 2)
+
     def test_assignment_exact_nested_escaped(self):
         text = '  consult [nested] \\[escaped\\] $(echo x); "quoted"  '
         self.assertEqual(r.parse_request('[' + text + '] codex').assignment, text)

@@ -21,7 +21,7 @@ import cli_transport as transport
 from cross_agent_protocol import (ProtocolError, validate_binding, load_skill_context, adapter_call, prepare_stop)
 from cross_agent_profiles import WRITER_PROFILES, profile_grants
 from cross_agent_request import (AgentGroup, FAMILIES, FORM_HINT, default_groups, load_config, parse_request,
-                                 resolve_agents, UnavailableError)
+                                 reject_duplicate_recipients, resolve_agents, UnavailableError)
 from cross_agent_state import TaskContext, select_session, reserve_session, update_session, finish_session, StateError
 
 STATUSES = frozenset(('COMPLETED', 'CONSULTATION_REQUIRED', 'USER_INPUT_REQUIRED',
@@ -523,6 +523,7 @@ def dispatch(request, host_context):
                                             host.config, host.host_family)[0])
         except UnavailableError as exc:
             preflight.append(exc)
+    reject_duplicate_recipients([a for a in preflight if not isinstance(a, UnavailableError)])
     # Host owns target selection/freshness; optional owner policy validates it.
     fresh = json.loads(json.dumps(host.target_identity))
     if not isinstance(fresh, dict):

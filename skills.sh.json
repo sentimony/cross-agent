@@ -10,10 +10,11 @@
       ]
     },
     {
-      "title": "Renamed skills",
-      "description": "Earlier names of renamed skills. No files remain under these names.",
+      "title": "Deprecated",
+      "description": "Skills that were renamed (context-transfer → transfer-context) or moved to another repository (transfer-context → sentimony/skills). No files remain under these names.",
       "skills": [
-        "context-transfer"
+        "context-transfer",
+        "transfer-context"
       ]
     }
   ]

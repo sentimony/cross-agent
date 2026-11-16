@@ -27,3 +27,18 @@
    `--model` itself.
 8. Use dated feature branches. Commit locally only when requested by the controller;
    never push, merge, tag, publish or create the remote repository without permission.
+9. Renaming a released skill moves `skills/<old>/` to `skills/<new>/` like a directory
+   rename: no file of the old skill remains. Its files change only in the name and its
+   mentions; the version continues with a patch bump, and the CHANGELOG entry names the old
+   name. The old name goes to the last `Deprecated` group of `skills.sh.json`. Content
+   changes go in a separate PR and version.
+10. `skills.sh.json` lists every skill skills.sh knows for this repository: a name missing
+    from it shows on the skills.sh page under an unwanted `Other skills` heading. Any change
+    that adds, renames, moves out or removes a skill updates the file in the same PR. A skill
+    under `skills/` goes to the `Skills` group, both its `skills` list and the parentheses of
+    its description, in README order. A name with no files left goes to the last
+    `Deprecated` group, and that group's description records it in two pairs of parentheses,
+    entries separated by ` · `: renamed skills as `old → new` (`context-transfer →
+    transfer-context`), skills moved to another repository as `skill → owner/repo`
+    (`transfer-context → sentimony/skills`). A skill that was renamed and then moved appears
+    under both names in the `skills` list.
