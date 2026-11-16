@@ -1,4 +1,15 @@
+Thumbs.db
+.DS_Store
+.idea/
 __pycache__/
 *.pyc
+
+*.local*
+*.env*
+
+.agents/
+.claude/
+skills-lock.json
+
 .cross-agent/
 .auto-reviewer/

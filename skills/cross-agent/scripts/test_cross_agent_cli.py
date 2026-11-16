@@ -154,6 +154,20 @@ class RunTests(CliFixture):
         self.assertIn('codex no-network: sandbox workspace-write, no network, no write access to .git',
                       doc['warnings'])
 
+    def test_identical_recipients_are_blocked_before_any_launch(self):
+        result, doc = self.run_cli('run', '--mode', 'read-only', *self.brief(), 'codex sol low codex sol low')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(doc['status'], 'BLOCKED')
+        self.assertIn('duplicate recipient', doc['reason'])
+        self.assertFalse((self.state() / 'artifacts').exists())
+        result, doc = self.run_cli('run', '--dry-run', '--mode', 'read-only', *self.brief(), 'codex codex')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('duplicate recipient', doc['reason'])
+        result, doc = self.run_cli('run', '--dry-run', '--mode', 'read-only', *self.brief(),
+                                   'codex sol low codex sol high')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(doc['recipients']), 2)
+
     def test_legacy_invocation_still_works(self):
         host = self.root / 'host.json'
         host.write_text(json.dumps({'task_context': {'registry_path': str(self.root / 'reg'),
@@ -208,6 +222,23 @@ class InitHostTests(CliFixture):
         result, doc = self.run_cli('run', *self.brief(), 'codex sol low')
         self.assertEqual(result.returncode, 2)
         self.assertIn('host.json belongs to another repository', doc['reason'])
+
+    def test_host_document_that_is_not_an_object_is_blocked_not_a_traceback(self):
+        made, doc = self.run_cli('init-host', '--repo', str(self.repo), '--host-family', 'claude-code',
+                                 '--conversation-id', 'c')
+        stored = Path(doc['host_context'])
+        loose = self.root / 'loose.json'
+        for body in ('[]', 'null', '"x"', '3'):
+            stored.write_text(body)
+            loose.write_text(body)
+            for args in (('status', '--json'), ('run', '--dry-run', *self.brief(), 'codex sol low'),
+                         ('status', '--json', '--host-context', str(loose))):
+                with self.subTest(body=body, args=args):
+                    result, out = self.run_cli(*args)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertNotIn('Traceback', result.stderr)
+                    self.assertEqual(out['status'], 'BLOCKED')
+                    self.assertIn('JSON object', out['reason'])
 
 
 class StatusTests(CliFixture):

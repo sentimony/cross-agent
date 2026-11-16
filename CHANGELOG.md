@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.13 - 2026-11-16
+
+1. `cross-agent` 0.0.13: two recipients that resolve to the same family, model and effort are
+   refused with `duplicate recipient` before any state change or launch, in `resolve_agents`,
+   `dispatch` and `--dry-run` (before, the second one resumed the first's provider session in
+   the same call and failed with `cli_session_id mismatch` after a real launch). A host
+   document (`host.json` or `--host-context`) that is not a JSON object is a `BLOCKED` result
+   with exit code 2 instead of a traceback. Request `261116T1108` in skills-aiassist.
+2. `skills.sh.json` follows the agentic-workflow format: the group `Skills` and a last group
+   `Deprecated` that lists `context-transfer` (renamed to `transfer-context`) and
+   `transfer-context` (moved to `sentimony/skills`) instead of `Renamed skills`.
+3. `AGENTS.md` records the rules for renaming a released skill and for `skills.sh.json`.
+4. The three platform manifests carry `0.0.13`.
+
 ## 0.0.12 - 2026-11-15
 
 1. `cross-agent` 0.0.12: optional `brief_metrics` object in the `prepare` response (stored in

@@ -16,6 +16,11 @@ from cross_agent_request import load_config, parse_request
 
 from cross_agent_state import TaskContext
 
+# The fake codex reports the model and effort it was launched with.
+SESSION_META = ("print(json.dumps({'type':'session_meta','payload':{'model':args[args.index('-m')+1],"
+                "'reasoning_effort':args[args.index('-m')+3].split('\"')[1]}}),flush=True)")
+
+
 class ProcessContract(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -35,7 +40,7 @@ if 'SLEEP' in brief:
  time.sleep(20)
 sid=args[-2] if 'resume' in args else str(uuid.uuid4())
 print(json.dumps({'type':'thread.started','thread_id':sid}),flush=True)
-print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)
+print(json.dumps({'type':'session_meta','payload':{'model':args[args.index('-m')+1],'reasoning_effort':args[args.index('-m')+3].split('"')[1]}}),flush=True)
 value={'schema_version':1,'status':'COMPLETED','output':'done'}
 if 'HANDOFF' in brief and 'Host answer' not in brief:
  value.update(status='CONSULTATION_REQUIRED',handoff={'question':'Which?','options':['A','B'],'evidence':[],'consultants':['claude-code']})
@@ -46,7 +51,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         (self.bin / 'codex').write_text(fixture)
         (self.bin / 'codex').chmod(0o700)
         self.policy = {'schema_version': 1, 'agents': {'codex': {
-            'models': {'gpt-6.1-sol': ['low']}, 'default_model': 'gpt-6.1-sol',
+            'models': {'gpt-6.1-sol': ['low', 'medium']}, 'default_model': 'gpt-6.1-sol',
             'default_effort': 'low', 'profiles': ['read-only'],
             'capabilities': {'read-only': 'supported'}}}}
         self.host = HostContext(load_config(host_config=self.policy, role='consultation', profile='read-only'),
@@ -302,7 +307,15 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         from unittest.mock import patch
         with patch('cross_agent._process') as process:
             with self.assertRaises(ValueError):
-                dispatch(parse_request('codex codex [read] --session one'), self.host)
+                dispatch(parse_request('codex sol low codex sol medium [read] --session one'), self.host)
+            process.assert_not_called()
+        self.assertFalse((self.root / 'registry').exists())
+
+    def test_identical_recipients_prevent_launch_and_state(self):
+        from unittest.mock import patch
+        with patch('cross_agent._process') as process:
+            with self.assertRaisesRegex(ValueError, 'duplicate recipient'):
+                dispatch(parse_request('codex sol low codex gpt-6.1-sol low [read]'), self.host)
             process.assert_not_called()
         self.assertFalse((self.root / 'registry').exists())
 
@@ -456,13 +469,13 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
     def test_partial_failure_shared_task_snapshot(self):
         result = dispatch(parse_request('claude codex [read]'), self.host)
         self.assertEqual([r['status'] for r in result.results], ['UNAVAILABLE', 'COMPLETED'])
-        result = dispatch(parse_request('codex codex --task new [read]'), self.host)
+        result = dispatch(parse_request('codex sol low codex sol medium --task new [read]'), self.host)
         self.assertEqual(len({r['task_id'] for r in result.results}), 1)
         self.assertEqual(result.results[0]['target_identity'], result.results[1]['target_identity'])
 
     def test_task_new_clears_inherited_issue_for_all_recipients(self):
         host = replace(self.host, task_context=replace(self.host.task_context, canonical_issue='42'))
-        result = dispatch(parse_request('codex codex --task new [read]'), host)
+        result = dispatch(parse_request('codex sol low codex sol medium --task new [read]'), host)
         self.assertEqual([r['status'] for r in result.results], ['COMPLETED', 'COMPLETED'])
         self.assertEqual(len({r['task_id'] for r in result.results}), 1)
         explicit = dispatch(parse_request('codex --task ' + result.task_id + ' [read]'), host)
@@ -495,7 +508,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
                     return 'CANCELLED', 'SIGNAL'
                 with patch('cross_agent._process', side_effect=execute) as process, \
                      patch('cross_agent.finish_session', side_effect=StateError('REGISTRY_BUSY')):
-                    result = dispatch(parse_request('codex codex [read]'), host)
+                    result = dispatch(parse_request('codex sol low codex sol medium [read]'), host)
                 if status == 'CANCELLED':
                     self.assertEqual(process.call_count, 1)
                     self.assertEqual(len(result.results), 1)
@@ -541,7 +554,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
     def test_missing_provider_identity_blocks_resume(self):
         fixture = self.bin / 'codex'
         text = fixture.read_text()
-        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        old = SESSION_META
         self.assertEqual(text.count(old), 1)
         fixture.write_text(text.replace(old, ''))
         first = dispatch(parse_request('codex [read]'), self.host).results[0]
@@ -555,7 +568,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
         # Real codex exec --json prints no session_meta; the rollout file names the model.
         fixture = self.bin / 'codex'
         text = fixture.read_text()
-        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        old = SESSION_META
         self.assertEqual(text.count(old), 1)
         rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
                    "day.mkdir(parents=True,exist_ok=True)\n"
@@ -575,7 +588,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
     def codex_with_rollout(self, extra_line):
         fixture = self.bin / 'codex'
         text = fixture.read_text()
-        old = "print(json.dumps({'type':'session_meta','payload':{'model':'gpt-6.1-sol','reasoning_effort':'low'}}),flush=True)"
+        old = SESSION_META
         self.assertEqual(text.count(old), 1)
         rollout = ("day=Path(os.environ['HOME'])/'.codex'/'sessions'/'2026'/'11'/'03'\n"
                    "day.mkdir(parents=True,exist_ok=True)\n"
@@ -705,7 +718,7 @@ Path(args[args.index('-o')+1]).write_text(json.dumps(value))
     def test_cancel_stops_remaining_recipients(self):
         from unittest.mock import patch
         with patch('cross_agent._process', return_value=('CANCELLED', 'SIGNAL')) as process:
-            result = dispatch(parse_request('codex codex [read]'), self.host)
+            result = dispatch(parse_request('codex sol low codex sol medium [read]'), self.host)
         self.assertEqual(len(result.results), 1)
         self.assertEqual(process.call_count, 1)
 

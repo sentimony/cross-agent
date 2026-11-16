@@ -2,7 +2,7 @@
 name: cross-agent
 description: Delegate a consultation, second opinion or installed-skill run to another agent CLI, keeping compatible sessions. Use when the user asks a different agent CLI for one of these. Review policy comes from an installed owner adapter.
 metadata:
-  version: "0.0.12"
+  version: "0.0.13"
 license: MIT
 compatibility: Requires Python 3.9 or newer, explicit trusted agent configuration and a verified CLI profile. Native host coverage remains unverified for this experimental package.
 argument-hint: "[run|status|adopt|init-host|cancel|wait] [<agent> [model] [effort]] <[assignment]> [--mode full|no-network|read-only] [--task <id|new>] [--session <id>] [--new] [--dry-run]"
@@ -96,7 +96,7 @@ The host owns permissions, task classification, installed sources and session id
    `CONSULTATION_REQUIRED` or `USER_INPUT_REQUIRED` result whose `handoff` is malformed keeps
    its status with `handoff_invalid: true`: read the question from `output` and answer the
    same session. Codex resume needs the provider rollout ([CLI runtime](cli-runtime.md)).
-3. Multiple read-only recipients share one host snapshot; execution has one writer.
+3. Multiple read-only recipients share one host snapshot (identical recipients are refused); execution has one writer.
    Preserve provider provenance even after failed identity attestation. An executor's
    provider session cannot become its own independent reviewer through another host ID.
 4. A delegated agent cannot invoke this launcher again through CLI, direct API or resume.

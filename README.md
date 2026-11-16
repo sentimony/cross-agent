@@ -3,19 +3,19 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.12`
+Version: `v0.0.13`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.12 | cross-agent |
+| [cross-agent](.) | 0.0.13 | cross-agent |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.12 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.13 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
 
 ## Overview
 

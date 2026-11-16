@@ -301,6 +301,17 @@ def default_groups(config: AgentConfig, host_family: str) -> Tuple[AgentGroup, .
                  and config.agents[f].capabilities.get(config.profile) == 'supported')
 
 
+def reject_duplicate_recipients(choices):
+    """Refuse two recipients with one (family, model, effort): they share a session key, so the
+    second would resume the first one's provider session inside the same call and fail."""
+    seen = set()
+    for choice in choices:
+        key = (choice.family, choice.model, choice.effort)
+        if key in seen:
+            raise ValueError('duplicate recipient: %s %s %s' % key)
+        seen.add(key)
+
+
 def resolve_agents(request: Request, config: AgentConfig, host_family: str) -> list:
     """Resolve configured recipients, raising ValueError or UnavailableError.
 
@@ -334,4 +345,5 @@ def resolve_agents(request: Request, config: AgentConfig, host_family: str) -> l
         if group.family == 'antigravity' and config.profile != 'read-only':
             raise UnavailableError('Antigravity %s has no verified scoped adapter' % config.profile)
         choices.append(AgentChoice(group.family, model, effort, config.role, config.profile, group.family == host))
+    reject_duplicate_recipients(choices)
     return choices
