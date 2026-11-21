@@ -583,6 +583,52 @@ class WaitTests(ControlFixture):
         self.assertEqual((code, answer['status'], answer['reason']), (2, 'BLOCKED', 'UNKNOWN_SESSION'))
 
 
+class ShowTests(CliFixture):
+    def saved_run(self, *recipients):
+        result, _ = self.run_cli('run', '--repo', str(self.repo), *self.brief(), *recipients)
+        path = self.root / 'result.out'
+        path.write_text(result.stdout)
+        return path
+
+    def test_show_prints_status_and_text_of_a_run(self):
+        path = self.saved_run('codex sol low')
+        shown, _ = self.run_cli('show', str(path))
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        header, _, text = shown.stdout.partition('\n')
+        self.assertTrue(header.startswith('[1/1] COMPLETED codex gpt-6.1-sol low session='), header)
+        self.assertIn('danger-full-access', text)
+
+    def test_show_reads_a_result_json_from_status(self):
+        self.saved_run('codex sol low')
+        _, doc = self.run_cli('status', '--json')
+        shown, _ = self.run_cli('show', doc['sessions'][0]['result_path'])
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertIn('[1/1] COMPLETED', shown.stdout)
+
+    def test_show_lists_every_recipient_and_fails_on_a_failed_one(self):
+        path = self.root / 'two.json'
+        path.write_text(json.dumps({'schema_version': 1, 'results': [
+            {'status': 'COMPLETED', 'family': 'codex', 'output': 'first'},
+            {'status': 'UNAVAILABLE', 'family': 'claude-code', 'reason': 'not configured'}]}))
+        shown, _ = self.run_cli('show', str(path))
+        self.assertEqual(shown.returncode, 1)
+        self.assertIn('[1/2] COMPLETED codex', shown.stdout)
+        self.assertIn('[2/2] UNAVAILABLE claude-code', shown.stdout)
+        self.assertTrue(shown.stdout.rstrip().endswith('not configured'))
+
+    def test_show_refuses_a_file_that_is_not_a_run_result(self):
+        for name, body in (('error.txt', 'Traceback (most recent call last): boom'),
+                           ('other.json', json.dumps({'schema_version': 1, 'dry_run': True, 'recipients': []})),
+                           ('empty.json', json.dumps({'results': []})),
+                           ('list.json', '[]')):
+            (self.root / name).write_text(body)
+            shown, doc = self.run_cli('show', str(self.root / name))
+            self.assertEqual((shown.returncode, doc['status'] if doc else None), (2, 'BLOCKED'), name)
+            self.assertIn('not a run result', doc['reason'])
+        shown, doc = self.run_cli('show', str(self.root / 'missing.json'))
+        self.assertEqual((shown.returncode, doc['status']), (2, 'BLOCKED'))
+
+
 class CancelEndToEnd(CliFixture):
     def test_cancel_stops_a_running_launcher_and_wait_sees_it(self):
         if not os.path.exists(cli.PS):

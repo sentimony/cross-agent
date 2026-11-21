@@ -109,11 +109,52 @@
 1. `run` prints the `DispatchResult`.
 2. `run --dry-run` prints `{"schema_version": 1, "dry_run": true, "recipients": [...], "warnings": [...]}`.
 3. `status` prints one line per session, or the rows below with `--json`.
+   `show <file>` prints the status and answer text of each recipient of a saved `run` stdout
+   or of a `result.json` (see "Result JSON" below).
 4. `init-host` prints `{"schema_version": 1, "status": "COMPLETED", "host_context", "state_dir"}`.
 5. `cancel` prints `{"schema_version": 1, "status": "COMPLETED", "action": "cancel", "session_id",
    "pid", "signalled": true}`, or `BLOCKED` with `UNKNOWN_SESSION`, `NOT_RUNNING` or `PID_MISMATCH`.
 6. `wait` prints the status row with `waited_seconds` and `timed_out`; the exit code is 0
    (finished), 3 (timeout) or 2 (`BLOCKED`).
+
+## Result JSON
+
+`run` prints one `DispatchResult`; the answer text of a recipient is `results[i].output`,
+there is no other place for it. One recipient (fields not needed to read the answer are
+omitted):
+
+```json
+{"schema_version": 1, "task_id": "<task>", "target_identity": {"tree": "<tree>"},
+ "warnings": [],
+ "results": [
+   {"family": "codex", "status": "COMPLETED", "output": "<the answer text>",
+    "session_id": "<registry session>", "cli_session_id": "<provider session>",
+    "actual_model": "<model>", "actual_effort": "<effort>",
+    "profile": "read-only", "role": "consultation",
+    "usage": {"tokens": {}, "cost_usd": null},
+    "artifacts": {"result": "<run>/result.json", "output": "<run>/review.md",
+                  "stdout": "<run>/stdout.json", "log": "<run>/run.log",
+                  "brief": "<run>/brief.md", "identity": "<run>/identity.json",
+                  "usage": "<run>/usage.json"}}]}
+```
+
+1. Several recipients give several entries in `results`, in request order; always iterate
+   over `results`, also for one recipient.
+2. `status` is one of the generic statuses. A recipient that did not finish has no
+   `output` or a partial one and carries `reason`. `CONSULTATION_REQUIRED` and
+   `USER_INPUT_REQUIRED` add `handoff` (`question`, `options`, `evidence`, `consultants`),
+   or `handoff_invalid: true` with the question in `output`.
+3. `session_id` (registry) and `cli_session_id` (provider) are what a later resume needs;
+   `cli_session_id` is `"unknown"` until the provider confirms it. Artifact paths are
+   under `artifacts`; `artifacts.result` is the same entry as one `result.json`.
+4. A run that stops before it starts a child (for example `BLOCKED`) prints a single
+   document `{"schema_version": 1, "status": "BLOCKED", "reason": ...}` with no `results`.
+   Text that is not JSON in the saved file is a launcher crash, not a result.
+5. Read the answer with `python3 <skill-dir>/scripts/cross_agent.py show <file>`: one header
+   line `[n/total] STATUS family model effort session=<id>` per recipient, then its
+   `output` (its `reason` when there is no output). Exit code 0 when every recipient is
+   `COMPLETED`, 1 when one is not, 2 (`BLOCKED` JSON) when the file is missing, is not JSON or
+   is not a run result (a `results` list, or a `result.json` with `artifacts`).
 
 ## Status rows
 

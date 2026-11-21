@@ -25,7 +25,7 @@ from cross_agent_request import (FAMILIES, FORM_HINT, UnavailableError, default_
                                  parse_request, reject_duplicate_recipients, resolve_agents)
 from cross_agent_state import StateError, TaskContext
 
-SUBCOMMANDS = ('run', 'status', 'adopt', 'init-host', 'cancel', 'wait')
+SUBCOMMANDS = ('run', 'status', 'adopt', 'init-host', 'cancel', 'wait', 'show')
 GIT = 'git'
 PS = '/bin/ps'
 START_TOLERANCE_SECONDS = 5  # etime has 1 s resolution; the clocks are read at different moments
@@ -272,6 +272,47 @@ def _timeout_seconds(text):
     return value
 
 
+def read_result(path):
+    """The recipient entries of a saved run result: a `run` document or one `result.json`.
+
+    Raises Blocked when the file is missing, not JSON (for example an error text saved in its
+    place) or not a run result."""
+    try:
+        document = json.loads(Path(path).read_text('utf-8'))
+    except (OSError, ValueError) as exc:
+        raise Blocked('not a run result: ' + str(path) + ' (' + type(exc).__name__ + ')')
+    if isinstance(document, dict) and isinstance(document.get('results'), list):
+        entries = document['results']
+    elif isinstance(document, dict) and document.get('status') in core.STATUSES and isinstance(document.get('artifacts'), dict):
+        entries = [document]
+    else:
+        raise Blocked('not a run result: ' + str(path) + ' (expected a run document or a result.json)')
+    if not entries or any(not isinstance(e, dict) or e.get('status') not in core.STATUSES for e in entries):
+        raise Blocked('not a run result: ' + str(path) + ' (no recipient with a known status)')
+    return entries
+
+
+def format_result(entries):
+    """One header line per recipient, then its answer text (or its reason when it has none)."""
+    blocks = []
+    for number, entry in enumerate(entries, 1):
+        header = '[%d/%d] %s %s %s %s session=%s' % (
+            number, len(entries), entry['status'], entry.get('family') or '-',
+            entry.get('actual_model') or '-', entry.get('actual_effort') or '-',
+            entry.get('session_id') or '-')
+        body = entry.get('output')
+        if not isinstance(body, str) or not body.strip():
+            body = entry.get('reason') if isinstance(entry.get('reason'), str) else ''
+        blocks.append(header + ('\n' + body.rstrip('\n') if body else ''))
+    return '\n\n'.join(blocks)
+
+
+def _show(args):
+    entries = read_result(args.file)
+    print(format_result(entries))
+    return 0 if all(e['status'] == 'COMPLETED' for e in entries) else 1
+
+
 def _emit(document, **dump):
     print(json.dumps(document, **dump))
 
@@ -287,6 +328,9 @@ def _common(parser):
 
 def build_parser(command):
     parser = argparse.ArgumentParser(prog='cross_agent.py ' + command, description=__doc__)
+    if command == 'show':
+        parser.add_argument('file', help='Saved stdout of run, or a result.json from status')
+        return parser
     if command == 'init-host':
         parser.add_argument('--repo', help='Repository (default: cwd)')
         parser.add_argument('--host-family', choices=HOST_FAMILIES)
@@ -507,7 +551,7 @@ def _wait(args):
 
 
 COMMANDS = {'run': _run, 'status': _status, 'adopt': _adopt, 'init-host': _init_host,
-            'cancel': _cancel, 'wait': _wait}
+            'cancel': _cancel, 'wait': _wait, 'show': _show}
 
 
 def main(argv=None):

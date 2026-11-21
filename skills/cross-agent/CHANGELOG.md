@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.14 - 2026-11-21
+
+1. `protocol.md` gains a "Result JSON" section: where the answer text (`results[i].output`),
+   status, handoff, session IDs and artifacts lie for one and for several recipients, and what a
+   run that stops early prints (request `20261117T2321`, issue skills-aiassist#120).
+2. New subcommand `show <file>` prints the status and answer text of each recipient of a saved
+   `run` stdout or of a `result.json`. Exit code 0 when every recipient is `COMPLETED`, 1
+   otherwise, 2 (`BLOCKED`) when the file is missing, not JSON (an error text saved in its place)
+   or not a run result.
+3. `SKILL.md` tells how to read the answer after `run` and adds `show` to `argument-hint`.
+
 ## 0.0.13 - 2026-11-16
 
 1. Refuse two recipients with the same family, model and effort (`duplicate recipient`) before

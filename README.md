@@ -3,19 +3,19 @@
 Experimental standalone agent delegation plugin and skill for Claude Code, Codex, and
 other AI coding agents.
 
-Version: `v0.0.13`
+Version: `v0.0.14`
 
 ## Plugins
 
 | Plugin | Version | Skills |
 | --- | --- | --- |
-| [cross-agent](.) | 0.0.13 | cross-agent |
+| [cross-agent](.) | 0.0.14 | cross-agent |
 
 ## Skills
 
 | Skill | Version | Command | Description |
 | --- | --- | --- | --- |
-| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.13 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
+| [cross-agent](skills/cross-agent/SKILL.md) | 0.0.14 | `/cross-agent` | Delegate a consultation or an installed skill to another configured agent CLI, keeping task and provider session identity. |
 
 ## Overview
 
@@ -41,7 +41,7 @@ Version: `v0.0.13`
    checked.
 6. Since `v0.0.8` an execution run defaults to the `full` profile; `--mode no-network` or
    `--mode read-only` narrows it. `run`, `status`, `adopt`, `init-host`, `cancel` and `wait`
-   build the host JSON from the repository; Antigravity models stay unavailable until a
+   build the host JSON from the repository; `show <file>` prints the answer text of a saved run; Antigravity models stay unavailable until a
    live probe.
 
 ## Install
