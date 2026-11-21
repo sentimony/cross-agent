@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.14 - 2026-11-21
+
+1. `cross-agent` 0.0.14: the JSON shape of a run result is documented in `protocol.md`
+   ("Result JSON") and the new `show <file>` subcommand prints only the status and answer text
+   of each recipient, refusing a file that is not a run result (exit 2). Issue
+   skills-aiassist#120.
+2. The three platform manifests carry `0.0.14`.
+
 ## 0.0.13 - 2026-11-16
 
 1. `cross-agent` 0.0.13: two recipients that resolve to the same family, model and effort are
